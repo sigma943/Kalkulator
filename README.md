@@ -75,3 +75,34 @@ pozornego zera. Temperatura jest sprawdzana względem zera bezwzględnego.
 [NBP Web API](https://api.nbp.pl/),
 [NIST: przedrostki binarne](https://physics.nist.gov/cuu/Units/binary.html),
 [NIST: współczynniki konwersji](https://www.nist.gov/pml/special-publication-811/nist-guide-si-appendix-b-conversion-factors/nist-guide-si-appendix-b9).
+
+## Wersja 1.1.0 i animacja
+
+Przytrzymanie `=` otwiera nową sześci sekundową scenę Hog Ridera: oryginalny
+`hog_rider.png`, płynne wejście, złote i fioletowe orbity, unoszące się iskry
+oraz reakcja na dotknięcie portretu. Jest przycisk zamknięcia; działają też
+systemowy Wstecz i automatyczne wyjście. Dźwięk i wibracje respektują ustawienia
+aplikacji, a wyłączone animacje systemowe ograniczają ruch. Liczba cząsteczek
+jest stała, a tempo ruchu wynika z czasu klatek, nie z częstotliwości ekranu.
+
+Build release ma wyłączone debugowanie, optymalizację R8 i usuwanie nieużywanych
+zasobów. W Actions powstaje `Kalkulator-Release-1.1.0` (APK, AAB i mapping R8).
+Bez klucza są to pliki **niepodpisane**: APK wymaga podpisania przed instalacją,
+a AAB przed przesłaniem do Google Play. Nie są zastępowane kluczem debug.
+
+Do automatycznego podpisywania skonfiguruj repozytorium → Settings → Secrets
+and variables → Actions:
+
+- `RELEASE_KEYSTORE_BASE64`: jednoliniowy Base64 prywatnego pliku JKS.
+- `RELEASE_STORE_PASSWORD`: hasło magazynu.
+- `RELEASE_KEY_PASSWORD`: hasło klucza.
+- `RELEASE_KEY_ALIAS`: alias (domyślnie `upload`).
+
+Nigdy nie commituj pliku JKS ani haseł. Klucz CI jest odtwarzany w tymczasowym
+katalogu runnera i usuwany po buildzie. Zachowaj prywatną kopię klucza: kolejne
+aktualizacje wymagają tej samej tożsamości podpisu. Tag `v*` publikuje release
+wyłącznie wtedy, gdy APK jest podpisany prawdziwym kluczem release.
+
+Lokalnie: `./gradlew :app:assembleRelease :app:bundleRelease`.
+Ustaw `KEYSTORE_PATH`, `STORE_PASSWORD`, `KEY_PASSWORD`, opcjonalnie `KEY_ALIAS`,
+aby podpisać wynik. Przy braku tych ustawień wynik jest niepodpisany.

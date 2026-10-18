@@ -16,3 +16,8 @@
 local.properties
 .env
 debug.keystore
+
+# Private signing keys
+*.jks
+*.keystore
+*.keystore.base64

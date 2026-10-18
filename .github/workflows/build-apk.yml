@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   build:
-    name: Test & Build APK
+    name: Test & Build Debug and Release
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -29,8 +29,32 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Test and build Debug APK
-        run: ./gradlew :app:testDebugUnitTest :app:assembleDebug --stacktrace
+      - name: Prepare optional release signing
+        env:
+          RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+          RELEASE_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+        shell: python
+        run: |
+          import base64, os, pathlib, tempfile
+          fields = [os.environ.get(name, '') for name in ['RELEASE_KEYSTORE_BASE64', 'RELEASE_STORE_PASSWORD', 'RELEASE_KEY_PASSWORD']]
+          if any(fields) and not all(fields):
+              raise SystemExit('Release signing secrets are incomplete. Configure all three required secrets.')
+          with open(os.environ['GITHUB_ENV'], 'a') as env:
+              env.write('RELEASE_SIGNED=' + ('true' if all(fields) else 'false') + '\n')
+              if all(fields):
+                  fd, path = tempfile.mkstemp(suffix='.jks', dir=os.environ['RUNNER_TEMP'])
+                  with os.fdopen(fd, 'wb') as key:
+                      key.write(base64.b64decode(fields[0], validate=True))
+                  for name, value in [('KEYSTORE_PATH', path), ('STORE_PASSWORD', fields[1]), ('KEY_PASSWORD', fields[2]), ('KEY_ALIAS', os.environ.get('RELEASE_KEY_ALIAS') or 'upload')]:
+                      if '\n' in value or '\r' in value:
+                          raise SystemExit('Signing settings must be single-line values.')
+                      env.write(name + '=' + value + '\n')
+          print('Release signing configured.' if all(fields) else 'No release key configured: release outputs will be unsigned.')
+
+      - name: Test and build APKs and release bundle
+        run: ./gradlew :app:testDebugUnitTest :app:assembleDebug :app:assembleRelease :app:bundleRelease --stacktrace
 
       - name: Upload test reports
         if: always()
@@ -41,18 +65,49 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
-      - name: Locate and Rename APK
-        run: |
-          mkdir -p build-artifacts
-          cp app/build/outputs/apk/debug/app-debug.apk build-artifacts/Kalkulator-Debug.apk
+      - name: Upload animation previews
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Hog-Rider-previews
+          path: app/build/reports/hog-rider-previews/
+          if-no-files-found: ignore
+          retention-days: 30
 
-      - name: Upload APK
+      - name: Prepare build artifacts
+        run: |
+          mkdir -p build-artifacts/debug build-artifacts/release
+          cp app/build/outputs/apk/debug/app-debug.apk build-artifacts/debug/Kalkulator-Debug.apk
+          if [ "$RELEASE_SIGNED" = "true" ]; then
+            cp app/build/outputs/apk/release/app-release.apk build-artifacts/release/Kalkulator-1.1.0-release.apk
+            echo 'Release 1.1.0 signed with the configured release key.' > build-artifacts/release/BUILD-INFO.txt
+          else
+            cp app/build/outputs/apk/release/app-release-unsigned.apk build-artifacts/release/Kalkulator-1.1.0-release-unsigned.apk
+            echo 'Release 1.1.0 UNSIGNED. Sign with your production key before installing or publishing.' > build-artifacts/release/BUILD-INFO.txt
+          fi
+          cp app/build/outputs/bundle/release/app-release.aab build-artifacts/release/Kalkulator-1.1.0-release.aab
+          cp app/build/outputs/mapping/release/mapping.txt build-artifacts/release/mapping.txt
+
+      - name: Upload Debug APK
         uses: actions/upload-artifact@v4
         with:
           name: Kalkulator-Debug-APK
-          path: build-artifacts/Kalkulator-Debug.apk
+          path: build-artifacts/debug/
           if-no-files-found: error
           retention-days: 30
+
+      - name: Upload Release build
+        uses: actions/upload-artifact@v4
+        with:
+          name: Kalkulator-Release-1.1.0
+          path: build-artifacts/release/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Remove temporary signing key
+        if: always()
+        run: |
+          if [ -n "$KEYSTORE_PATH" ]; then rm -f -- "$KEYSTORE_PATH"; fi
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
@@ -63,9 +118,13 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: Kalkulator-Debug-APK
+          name: Kalkulator-Release-1.1.0
           path: build-artifacts
+      - name: Require signed APK for publishing
+        run: test -f build-artifacts/Kalkulator-1.1.0-release.apk
       - uses: softprops/action-gh-release@v2
         with:
-          files: build-artifacts/Kalkulator-Debug.apk
+          files: |
+            build-artifacts/Kalkulator-1.1.0-release.apk
+            build-artifacts/Kalkulator-1.1.0-release.aab
           generate_release_notes: true

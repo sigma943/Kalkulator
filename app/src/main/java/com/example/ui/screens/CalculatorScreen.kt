@@ -340,7 +340,9 @@ fun CalculatorScreen(
 
     if (showHogRiderEasterEgg) {
         HogRiderEasterEggOverlay(
-            onDismiss = { viewModel.dismissHogRiderEasterEgg() }
+            onDismiss = { viewModel.dismissHogRiderEasterEgg() },
+            soundEnabled = settings.soundOnClick,
+            vibrateEnabled = settings.vibrateOnClick
         )
     }
 }

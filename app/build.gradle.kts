@@ -16,31 +16,37 @@ android {
     applicationId = "com.aistudio.calculator.kclqpm"
     minSdk = 24
     targetSdk = 36
-    versionCode = 1
-    versionName = "1.0"
+    versionCode = 2
+    versionName = "1.1.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
 
-  signingConfigs {
-    create("release") {
-      val keystorePath = System.getenv("KEYSTORE_PATH") ?: "${rootDir}/my-upload-key.jks"
-      storeFile = file(keystorePath)
-      storePassword = System.getenv("STORE_PASSWORD")
-      keyAlias = "upload"
-      keyPassword = System.getenv("KEY_PASSWORD")
-    }
+  val releaseKeystore = System.getenv("KEYSTORE_PATH")
+  val releaseStorePassword = System.getenv("STORE_PASSWORD")
+  val releaseKeyPassword = System.getenv("KEY_PASSWORD")
+  val hasReleaseSigning = !releaseKeystore.isNullOrBlank() &&
+    !releaseStorePassword.isNullOrBlank() && !releaseKeyPassword.isNullOrBlank()
 
+  signingConfigs {
+    if (hasReleaseSigning) {
+      create("release") {
+        storeFile = file(releaseKeystore!!)
+        storePassword = releaseStorePassword
+        keyAlias = System.getenv("KEY_ALIAS") ?: "upload"
+        keyPassword = releaseKeyPassword
+      }
+    }
   }
 
   buildTypes {
     release {
-      isCrunchPngs = false
-      isMinifyEnabled = false
+      isDebuggable = false
+      isMinifyEnabled = true
+      isShrinkResources = true
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-      signingConfig = signingConfigs.getByName("release")
+      if (hasReleaseSigning) signingConfig = signingConfigs.getByName("release")
     }
-
   }
   compileOptions {
     sourceCompatibility = JavaVersion.VERSION_11
