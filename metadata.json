@@ -1,0 +1,6 @@
+{
+  "name": "Kalkulator",
+  "description": "Nowoczesny, funkcjonalny kalkulator z trybem naukowym, historią obliczeń i motywem Material 3.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
