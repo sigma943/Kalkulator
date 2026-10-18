@@ -239,7 +239,7 @@ fun SettingsScreen(
             SettingsItemClickable(
                 icon = Icons.Outlined.Info,
                 title = "O aplikacji Kalkulator",
-                subtitle = "Wersja 1.0.0 • Material 3 Expressive",
+                subtitle = "Wersja ${com.example.BuildConfig.VERSION_NAME} • Material 3 Expressive",
                 testTag = "setting_about_app",
                 onClick = { showAboutDialog = true }
             )

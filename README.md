@@ -46,7 +46,7 @@ Wersja release wymaga własnego klucza: `KEYSTORE_PATH`, `STORE_PASSWORD`,
 Workflow **Build Android APK** uruchamia testy i buduje APK po pushu oraz dla PR.
 Można go też uruchomić ręcznie przez **Actions → Build Android APK → Run workflow**.
 Gotowy APK znajduje się w artefakcie **Kalkulator-Debug-APK**, a raporty testów
-w **Unit-test-reports**. Tag `v*` dodatkowo tworzy GitHub Release z debug APK.
+w **Unit-test-reports**. Tag `v*` publikuje GitHub Release z wersją produkcyjną, jeśli skonfigurowano klucz podpisu.
 APK debug służy do testowania; wydanie produkcyjne wymaga podpisu release.
 
 ## Niezawodność przelicznika
@@ -78,7 +78,7 @@ pozornego zera. Temperatura jest sprawdzana względem zera bezwzględnego.
 
 ## Wersja 1.1.0 i animacja
 
-Przytrzymanie `=` otwiera nową sześci sekundową scenę Hog Ridera: oryginalny
+Przytrzymanie `=` otwiera nową sześciosekundową scenę Hog Ridera: oryginalny
 `hog_rider.png`, płynne wejście, złote i fioletowe orbity, unoszące się iskry
 oraz reakcja na dotknięcie portretu. Jest przycisk zamknięcia; działają też
 systemowy Wstecz i automatyczne wyjście. Dźwięk i wibracje respektują ustawienia
