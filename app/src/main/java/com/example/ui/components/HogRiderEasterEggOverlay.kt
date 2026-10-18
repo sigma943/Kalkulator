@@ -98,8 +98,10 @@ fun HogRiderEasterEggOverlay(
         modifier = modifier.fillMaxSize().zIndex(9999f)
             .background(Color(0xFF080B16)).testTag("hog_rider_overlay")
     ) {
-        val compact = maxWidth > maxHeight
-        val heroSize = minOf(maxWidth * 0.8f, maxHeight * 0.44f, 360.dp)
+        val sceneWidth = maxWidth
+        val sceneHeight = maxHeight
+        val compact = sceneWidth > sceneHeight
+        val heroSize = minOf(sceneWidth * 0.8f, sceneHeight * 0.44f, 360.dp)
         Canvas(Modifier.fillMaxSize().graphicsLayer { alpha = exit }) {
             val center = Offset(size.width * (if (compact) 0.28f else 0.5f), size.height * 0.47f)
             val halo = minOf(size.width * 0.68f, size.height * 0.36f)
@@ -149,8 +151,8 @@ fun HogRiderEasterEggOverlay(
                 }
             }
             Spacer(Modifier.weight(1f))
-            Column(Modifier.fillMaxWidth().padding(start = if (compact) maxWidth * 0.44f else 0.dp).graphicsLayer { alpha = ease * exit }, horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("HOG RIDER", color = RiderCream, fontSize = minOf(40f, maxWidth.value / 9f).sp,
+            Column(Modifier.fillMaxWidth().padding(start = if (compact) sceneWidth * 0.44f else 0.dp).graphicsLayer { alpha = ease * exit }, horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("HOG RIDER", color = RiderCream, fontSize = minOf(40f, sceneWidth.value / 9f).sp,
                     fontWeight = FontWeight.Black, letterSpacing = 3.sp)
                 Spacer(Modifier.height(8.dp))
                 Text("Mały sekret. Wielkie wejście.", color = Color(0xFFC3B8CE), fontSize = 13.sp)
@@ -167,7 +169,7 @@ fun HogRiderEasterEggOverlay(
         Image(painter = painterResource(R.drawable.hog_rider), contentDescription = "Hog Rider — dotknij, aby wywołać iskry",
             contentScale = ContentScale.Fit,
             modifier = Modifier.align(if (compact) Alignment.CenterStart else Alignment.Center)
-                .offset(x = if (compact) maxWidth * 0.28f - heroSize / 2 else 0.dp, y = -(maxHeight * 0.03f)).size(heroSize)
+                .offset(x = if (compact) sceneWidth * 0.28f - heroSize / 2 else 0.dp, y = -(sceneHeight * 0.03f)).size(heroSize)
                 .graphicsLayer {
                     alpha = ease * exit
                     val sizeScale = (0.72f + ease * 0.28f) * (1f + impact * 0.15f)
