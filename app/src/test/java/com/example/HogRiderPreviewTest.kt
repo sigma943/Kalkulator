@@ -2,9 +2,10 @@ package com.example
 
 import android.graphics.Bitmap
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.ui.graphics.asAndroidBitmap
-import androidx.compose.ui.test.captureToImage
-import androidx.compose.ui.test.junit4.createComposeRule
+import android.graphics.Canvas
+import androidx.activity.ComponentActivity
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import com.example.ui.components.HogRiderEasterEggOverlay
@@ -21,13 +22,21 @@ import java.io.File
 @Config(sdk = [34], qualifiers = "w411dp-h891dp-port")
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class HogRiderPreviewTest {
-    @get:Rule val compose = createComposeRule()
+    @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
 
     private fun preview(name: String) {
-        compose.onNodeWithTag("hog_rider_overlay").captureToImage().asAndroidBitmap().let { bitmap ->
+        compose.onNodeWithTag("hog_rider_overlay").assertIsDisplayed()
+        // PixelCopy waits for a hardware frame that Robolectric does not produce.
+        // Draw the real Android view hierarchy into a software bitmap instead.
+        compose.runOnIdle {
+            val view = compose.activity.window.decorView
+            assertTrue(view.width > 0 && view.height > 0)
+            val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
+            view.draw(Canvas(bitmap))
             val file = File("build/reports/hog-rider-previews/$name.png")
             file.parentFile?.mkdirs()
             file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+            bitmap.recycle()
             assertTrue(file.length() > 1000)
         }
     }
