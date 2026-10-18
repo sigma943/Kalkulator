@@ -1,22 +1,49 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+# Kalkulator
 
-# Run and deploy your AI Studio app
+Kalkulator na Androida napisany w Kotlinie i Jetpack Compose. Działa lokalnie,
+obsługuje historię, motywy, funkcje naukowe i przeliczanie jednostek.
 
-This contains everything you need to run your app locally.
+## Obliczenia
 
-View your app in AI Studio: https://ai.studio/apps/815f1424-a050-4fdb-917a-f59569addc4d
+- Kolejność działań, nawiasy i mnożenie domyślne: `2(3+4) = 14`.
+- Liczby ujemne: `2×−3 = −6`, `2^−3 = 0,125`, `−2^2 = −4`.
+- Procenty: `200+10% = 220`, `200−10% = 180`, `200×10% = 20`, `50% = 0,5`.
+  Przy dodawaniu i odejmowaniu samodzielny prawy argument procentowy jest liczony
+  względem lewego argumentu. W iloczynach i ilorazach `%` oznacza dzielenie przez 100.
+- Funkcje trygonometryczne w DEG/RAD, logarytmy, pierwiastki, silnia oraz stałe π i e.
+- Przecinek i kropka dziesiętna; zapis naukowy w postaci `1E-13` lub `1×10^−13`.
+- Po `=` cyfra rozpoczyna nowe działanie, operator kontynuuje z pełną wartością
+  `Double`, niezależnie od ustawionego zaokrąglenia ekranu. Ponowne `=` zachowuje wynik.
+- Brakujące nawiasy zamykające są uzupełniane przy `=` i w podglądzie.
+- Przytrzymanie `=` uruchamia easter egg.
 
-## Run Locally
+Silnik używa arytmetyki `Double` (około 15–17 cyfr znaczących); nie jest przeznaczony
+do rozliczeń wymagających dokładnej arytmetyki dziesiętnej. Zaokrąglanie ekranu
+stosuje HALF_UP. Historia zapisuje wynik w formie wyświetlanej.
 
-**Prerequisites:**  [Android Studio](https://developer.android.com/studio)
+## Uruchomienie i testy
 
+Wymagania: JDK 21, Android SDK i Android Studio obsługujące konfigurację projektu.
+Otwórz katalog projektu w Android Studio i pozwól pobrać wymagane SDK.
+Gradle 9.3.1 jest pobierany przez dołączony Gradle Wrapper.
 
-1. Open Android Studio
-2. Select **Open** and choose the directory containing this project
-3. Allow Android Studio to fix any incompatibilities as it imports the project.
-4. Create a file named `.env` in the project directory and set `GEMINI_API_KEY` in that file to your Gemini API key (see `.env.example` for an example)
-5. Remove this line from the app's `build.gradle.kts` file: `signingConfig = signingConfigs.getByName("debugConfig")`
-6. Run the app on an emulator or physical device
-7. If you have already published your app in AI Studio, please [request upload key reset](https://support.google.com/googleplay/android-developer/answer/9842756#zippy=%2Crequest-an-upload-key-reset) in Google Play Console.
+```sh
+./gradlew :app:testDebugUnitTest
+./gradlew :app:assembleDebug
+```
+
+Windows: użyj `gradlew.bat` zamiast `./gradlew`.
+APK: `app/build/outputs/apk/debug/app-debug.apk`.
+Build debug używa standardowego klucza Android debug. Klucz API i plik `.env`
+nie są potrzebne do funkcji kalkulatora.
+
+Wersja release wymaga własnego klucza: `KEYSTORE_PATH`, `STORE_PASSWORD`,
+`KEY_PASSWORD`; alias klucza: `upload`. Nie dodawaj kluczy do repozytorium.
+
+## GitHub Actions
+
+Workflow **Build Android APK** uruchamia testy i buduje APK po pushu oraz dla PR.
+Można go też uruchomić ręcznie przez **Actions → Build Android APK → Run workflow**.
+Gotowy APK znajduje się w artefakcie **Kalkulator-Debug-APK**, a raporty testów
+w **Unit-test-reports**. Tag `v*` dodatkowo tworzy GitHub Release z debug APK.
+APK debug służy do testowania; wydanie produkcyjne wymaga podpisu release.

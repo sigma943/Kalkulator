@@ -135,26 +135,4 @@ class ExampleUnitTest {
         assertTrue(allLength.any { it.first.id == "km" && (it.second == "0.001" || it.second == "0,001") })
     }
 
-    @Test
-    fun testHogRiderEasterEggRapidTapsTrigger() {
-        var equalsTapTimestamps = mutableListOf<Long>()
-        var easterEggTriggered = false
-
-        fun tapEquals(fakeTime: Long) {
-            equalsTapTimestamps.removeAll { fakeTime - it > 1400 }
-            equalsTapTimestamps.add(fakeTime)
-            if (equalsTapTimestamps.size >= 3) {
-                equalsTapTimestamps.clear()
-                easterEggTriggered = true
-            }
-        }
-
-        // 3 rapid taps within 600ms
-        tapEquals(1000)
-        assertFalse(easterEggTriggered)
-        tapEquals(1200)
-        assertFalse(easterEggTriggered)
-        tapEquals(1400)
-        assertTrue(easterEggTriggered)
-    }
 }

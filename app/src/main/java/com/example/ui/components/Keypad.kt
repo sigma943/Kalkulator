@@ -22,6 +22,7 @@ fun Keypad(
     onBackspace: () -> Unit,
     onParenthesesClick: () -> Unit,
     onEquals: () -> Unit,
+    onEqualsLongClick: () -> Unit,
     vibrateEnabled: Boolean,
     soundEnabled: Boolean
 ) {
@@ -396,6 +397,7 @@ fun Keypad(
                 testTag = "btn_equals",
                 vibrateEnabled = vibrateEnabled,
                 soundEnabled = soundEnabled,
+                onLongClick = onEqualsLongClick,
                 onClick = onEquals
             )
         }

@@ -232,6 +232,7 @@ fun CalculatorScreen(
                             onBackspace = { viewModel.onBackspace() },
                             onParenthesesClick = { viewModel.onParentheses() },
                             onEquals = { viewModel.onEquals() },
+                            onEqualsLongClick = { viewModel.triggerHogRiderEasterEgg() },
                             vibrateEnabled = settings.vibrateOnClick,
                             soundEnabled = settings.soundOnClick
                         )
@@ -309,6 +310,7 @@ fun CalculatorScreen(
                         onBackspace = { viewModel.onBackspace() },
                         onParenthesesClick = { viewModel.onParentheses() },
                         onEquals = { viewModel.onEquals() },
+                            onEqualsLongClick = { viewModel.triggerHogRiderEasterEgg() },
                         vibrateEnabled = settings.vibrateOnClick,
                         soundEnabled = settings.soundOnClick
                     )

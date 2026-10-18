@@ -9,13 +9,13 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
-    name: Build & Export APK
+    name: Test & Build APK
     runs-on: ubuntu-latest
-
+    timeout-minutes: 30
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -23,51 +23,49 @@ jobs:
       - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
-          distribution: 'temurin'
+          distribution: temurin
           java-version: '21'
-
-      - name: Prepare Keystore & Environment
-        run: |
-          # Recreate debug.keystore from base64 if available, or generate a fresh one
-          if [ -f debug.keystore.base64 ]; then
-            echo "Restoring debug.keystore from base64..."
-            base64 -d debug.keystore.base64 > debug.keystore 2>/dev/null || base64 --decode debug.keystore.base64 > debug.keystore
-          elif [ ! -f debug.keystore ]; then
-            echo "Generating new debug.keystore..."
-            keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
-          fi
-          
-          # Create empty .env if not present
-          if [ ! -f .env ]; then
-            touch .env
-          fi
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '9.3.1'
 
-      - name: Build Debug APK
-        run: |
-          gradle :app:assembleDebug --stacktrace
+      - name: Test and build Debug APK
+        run: ./gradlew :app:testDebugUnitTest :app:assembleDebug --stacktrace
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Unit-test-reports
+          path: app/build/reports/tests/testDebugUnitTest/
+          if-no-files-found: ignore
+          retention-days: 14
 
       - name: Locate and Rename APK
         run: |
           mkdir -p build-artifacts
-          find app/build/outputs/apk/debug/ -name "*.apk" -exec cp {} build-artifacts/Kalkulator-Debug.apk \;
-          echo "Built APK files:"
-          ls -la build-artifacts/
+          cp app/build/outputs/apk/debug/app-debug.apk build-artifacts/Kalkulator-Debug.apk
 
-      - name: Upload APK to Artifacts (Direct Download)
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: Kalkulator-Debug-APK
           path: build-artifacts/Kalkulator-Debug.apk
+          if-no-files-found: error
           retention-days: 30
 
-      - name: Create GitHub Release (on version tag push)
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: Kalkulator-Debug-APK
+          path: build-artifacts
+      - uses: softprops/action-gh-release@v2
         with:
           files: build-artifacts/Kalkulator-Debug.apk
           generate_release_notes: true

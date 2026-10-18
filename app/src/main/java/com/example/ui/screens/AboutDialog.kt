@@ -250,7 +250,7 @@ fun HelpDialog(onDismiss: () -> Unit) {
                     fontSize = 14.sp
                 )
                 Text(
-                    text = "• Przeciągnij w dół z góry ekranu lub kliknij ikonę zegara, aby otworzyć historię.\n• Kliknij ikonę ze strzałkami (⌃/⌄), aby rozwinąć funkcje naukowe (sin, cos, pierwiastki, logarytmy).\n• Dłuższe przytrzymanie przycisku AC lub Backspace czyści całe wyrażenie.\n• 🐗 Sekret: Kliknij szybko 3 razy pod rząd znak '=', aby obudzić bestię...",
+                    text = "• Przeciągnij w dół z góry ekranu lub kliknij ikonę zegara, aby otworzyć historię.\n• Kliknij ikonę ze strzałkami (⌃/⌄), aby rozwinąć funkcje naukowe (sin, cos, pierwiastki, logarytmy).\n• Dłuższe przytrzymanie przycisku AC lub Backspace czyści całe wyrażenie.\n• Procenty: 200 + 10% = 220, 200 × 10% = 20.\n• Po wyniku cyfra zaczyna nowe działanie, a operator kontynuuje obliczenia.\n• 🐗 Sekret: Przytrzymaj znak '=', aby obudzić bestię...",
                     fontSize = 13.sp,
                     lineHeight = 18.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant

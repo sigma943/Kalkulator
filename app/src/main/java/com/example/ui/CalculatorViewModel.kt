@@ -65,7 +65,7 @@ class CalculatorViewModel(
     private val _showHogRiderEasterEgg = MutableStateFlow(false)
     val showHogRiderEasterEgg: StateFlow<Boolean> = _showHogRiderEasterEgg.asStateFlow()
 
-    private val equalsTapTimestamps = mutableListOf<Long>()
+    private var exactResult: Double? = null
 
     val isHistoryExpanded: StateFlow<Boolean> = _historyViewMode
         .map { it != HistoryViewMode.HIDDEN }
@@ -129,6 +129,10 @@ class CalculatorViewModel(
     }
 
     fun onDigit(digit: String) {
+        if (exactResult != null) {
+            exactResult = null
+            _expression.value = ""
+        }
         if (_expression.value.length >= 45) return
         _errorMessage.value = null
         _lastEvaluation.value = null
@@ -162,13 +166,21 @@ class CalculatorViewModel(
     }
 
     fun onOperator(op: String) {
+        if (op == "%") {
+            val last = _expression.value.lastOrNull() ?: return
+            if (isOperatorChar(last) || last == '(') return
+            onInsert(op)
+            return
+        }
         _errorMessage.value = null
         _lastEvaluation.value = null
-        val current = _expression.value
+        val current = exactResult?.let { "(${it})" } ?: _expression.value
+        exactResult = null
 
         if (current.isEmpty()) {
             if (op == "−" || op == "-") {
                 _expression.value = "−"
+                repository.settingsManager.saveLastExpression("−")
                 return
             }
             return
@@ -181,8 +193,13 @@ class CalculatorViewModel(
         }
 
         // If last character is already an operator, replace it
-        val updated = if (isOperatorChar(lastChar)) {
-            current.dropLast(1) + op
+        val updated = if ((op == "−" || op == "-") && isOperatorChar(lastChar)) {
+            // A minus following an operator starts a signed operand (2×−3).
+            if (current.length > 1 && lastChar in "−-" && isOperatorChar(current[current.lastIndex - 1])) current
+            else current + op
+        } else if (isOperatorChar(lastChar)) {
+            val withoutSign = if (current.length > 1 && lastChar in "−-" && isOperatorChar(current[current.lastIndex - 1])) current.dropLast(1) else current
+            withoutSign.dropLast(1) + op
         } else {
             current + op
         }
@@ -193,6 +210,10 @@ class CalculatorViewModel(
     }
 
     fun onParentheses() {
+        if (exactResult != null) {
+            exactResult = null
+            _expression.value = ""
+        }
         if (_expression.value.length >= 45) return
         _errorMessage.value = null
         _lastEvaluation.value = null
@@ -219,6 +240,14 @@ class CalculatorViewModel(
     }
 
     fun onInsert(text: String) {
+        if (text == "^") {
+            onOperator(text)
+            return
+        }
+        exactResult?.let { result ->
+            _expression.value = if (text == "%" || text == "!") "($result)" else ""
+            exactResult = null
+        }
         if (_expression.value.length >= 45) return
         _errorMessage.value = null
         _lastEvaluation.value = null
@@ -230,6 +259,7 @@ class CalculatorViewModel(
     }
 
     fun onBackspace() {
+        exactResult = null
         _errorMessage.value = null
         _lastEvaluation.value = null
         val current = _expression.value
@@ -257,6 +287,7 @@ class CalculatorViewModel(
     }
 
     fun onClear() {
+        exactResult = null
         _lastEvaluation.value = null
         _expression.value = ""
         _resultPreview.value = null
@@ -269,16 +300,11 @@ class CalculatorViewModel(
     }
 
     fun onEquals() {
-        val now = System.currentTimeMillis()
-        equalsTapTimestamps.removeAll { now - it > 1400 }
-        equalsTapTimestamps.add(now)
-
-        if (equalsTapTimestamps.size >= 3) {
-            equalsTapTimestamps.clear()
-            _showHogRiderEasterEgg.value = true
-        }
-
-        val expr = _expression.value
+        if (exactResult != null) return
+        val enteredExpression = _expression.value
+        // Complete open parentheses just as the live preview does.
+        val missing = enteredExpression.count { it == '(' } - enteredExpression.count { it == ')' }
+        val expr = enteredExpression + ")".repeat(missing.coerceAtLeast(0))
         if (expr.isBlank()) return
 
         val engineAngle = if (_angleUnit.value == "DEG") CalculatorEngine.AngleUnit.DEG else CalculatorEngine.AngleUnit.RAD
@@ -291,6 +317,7 @@ class CalculatorViewModel(
             formatGrouping = cfg.formatLargeNumbers
         )) {
             is CalculationResult.Success -> {
+                exactResult = res.value
                 val resultStr = res.formatted
                 viewModelScope.launch {
                     repository.saveHistory(expr, resultStr)
@@ -303,7 +330,7 @@ class CalculatorViewModel(
                 _expression.value = resultStr
                 _resultPreview.value = null
                 _errorMessage.value = null
-                repository.settingsManager.saveLastExpression(resultStr)
+                repository.settingsManager.saveLastExpression(res.value.toString())
             }
             is CalculationResult.Error -> {
                 _lastEvaluation.value = null
@@ -321,6 +348,7 @@ class CalculatorViewModel(
     }
 
     fun onSelectHistory(item: HistoryEntity, useResultOnly: Boolean) {
+        exactResult = null
         _lastEvaluation.value = null
         if (useResultOnly) {
             _expression.value = item.result
@@ -328,6 +356,7 @@ class CalculatorViewModel(
             _expression.value = item.expression
         }
         _errorMessage.value = null
+        repository.settingsManager.saveLastExpression(_expression.value)
         updatePreview(_expression.value)
         _historyViewMode.value = HistoryViewMode.HIDDEN
         _currentScreen.value = Screen.Calculator

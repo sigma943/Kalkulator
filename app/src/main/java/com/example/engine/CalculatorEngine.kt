@@ -26,7 +26,7 @@ object CalculatorEngine {
      * - Parentheses: ( )
      * - Functions: sin, cos, tan, asin, acos, atan, ln, log, sqrt, cbrt, abs
      * - Constants: π (pi), e
-     * - Postfix: ! (factorial), % (percent)
+     * - Postfix: ! (factorial), % (percent); a+b% = a+a*b/100
      * - Implicit multiplication: 2(3), 3π, 4√9, etc.
      */
     fun evaluate(
@@ -52,7 +52,7 @@ object CalculatorEngine {
                 return CalculationResult.Error("Błędny wynik (NaN)")
             }
             if (result.isInfinite()) {
-                return CalculationResult.Error("Nie można dzielić przez zero")
+                return CalculationResult.Error("Przekroczono zakres liczbowy")
             }
 
             val formatted = formatResult(result, decimalPlaces, formatGrouping)
@@ -119,13 +119,14 @@ object CalculatorEngine {
             .replace("√", "sqrt")
             .replace("∛", "cbrt")
             .replace("π", "pi")
-            .replace("e", "E") // distinguish from exp
+
     }
 
     private sealed class Token {
         data class Number(val value: Double) : Token()
         data class Operator(val symbol: Char, val precedence: Int, val isRightAssociative: Boolean = false) : Token()
         data class Function(val name: String) : Token()
+        data class Unary(val symbol: Char) : Token()
         data class Postfix(val symbol: Char) : Token()
         object OpenParen : Token()
         object CloseParen : Token()
@@ -143,7 +144,7 @@ object CalculatorEngine {
                 c.isDigit() || c == '.' -> {
                     // Check for implicit multiplication before number, e.g. )2, pi2
                     if (prevToken is Token.CloseParen || prevToken is Token.Postfix ||
-                        (prevToken is Token.Number && expr[i-1] == 'i') // after pi
+                        (prevToken is Token.Number && expr[i-1].isLetter()) // after a constant
                     ) {
                         tokens.add(Token.Operator('*', 2))
                     }
@@ -151,8 +152,17 @@ object CalculatorEngine {
                     while (i < expr.length && (expr[i].isDigit() || expr[i] == '.')) {
                         i++
                     }
+                    // Uppercase E is used by Double.toString() for lossless continuation.
+                    if (i < expr.length && expr[i] == 'E') {
+                        var exponentEnd = i + 1
+                        if (exponentEnd < expr.length && expr[exponentEnd] in "+-") exponentEnd++
+                        val exponentStart = exponentEnd
+                        while (exponentEnd < expr.length && expr[exponentEnd].isDigit()) exponentEnd++
+                        if (exponentEnd > exponentStart) i = exponentEnd
+                    }
                     val numStr = expr.substring(start, i)
                     val value = numStr.toDoubleOrNull() ?: throw IllegalArgumentException("Niepoprawna liczba: $numStr")
+                    if (!value.isFinite()) throw ArithmeticException("Przekroczono zakres liczbowy")
                     val token = Token.Number(value)
                     tokens.add(token)
                     prevToken = token
@@ -186,20 +196,13 @@ object CalculatorEngine {
                 }
                 c == '+' || c == '-' || c == '*' || c == '/' || c == '^' -> {
                     // Unary minus or plus check
-                    val isUnary = prevToken == null || prevToken is Token.OpenParen || prevToken is Token.Operator
-                    if (isUnary) {
-                        if (c == '-') {
-                            // Unary minus: treat as 0 - x or multiply by -1
-                            tokens.add(Token.Number(0.0))
-                            tokens.add(Token.Operator('-', 1))
-                            prevToken = Token.Operator('-', 1)
-                            i++
-                            continue
-                        } else if (c == '+') {
-                            // Ignore unary plus
-                            i++
-                            continue
-                        }
+                    val isUnary = prevToken == null || prevToken is Token.OpenParen || prevToken is Token.Operator || prevToken is Token.Unary
+                    if (isUnary && (c == '-' || c == '+')) {
+                        val token = Token.Unary(c)
+                        tokens.add(token)
+                        prevToken = token
+                        i++
+                        continue
                     }
 
                     val prec = when (c) {
@@ -250,7 +253,7 @@ object CalculatorEngine {
                     continue
                 }
                 else -> {
-                    // Ignore whitespace or unknown characters
+                    if (!c.isWhitespace()) throw IllegalArgumentException("Nieznany znak: $c")
                     i++
                 }
             }
@@ -262,11 +265,29 @@ object CalculatorEngine {
         val output = mutableListOf<Token>()
         val opStack = ArrayDeque<Token>()
 
+        var expectsOperand = true
         for (token in tokens) {
+            when (token) {
+                is Token.Number -> {
+                    require(expectsOperand) { "Brak operatora" }
+                    expectsOperand = false
+                }
+                is Token.Function, is Token.Unary, is Token.OpenParen -> {
+                    require(expectsOperand) { "Brak operatora" }
+                }
+                is Token.Operator -> {
+                    require(!expectsOperand) { "Niekompletne wyrażenie" }
+                    expectsOperand = true
+                }
+                is Token.Postfix, is Token.CloseParen -> {
+                    require(!expectsOperand) { "Brak argumentu" }
+                }
+            }
             when (token) {
                 is Token.Number -> output.add(token)
                 is Token.Postfix -> output.add(token)
                 is Token.Function -> opStack.addLast(token)
+                is Token.Unary -> opStack.addLast(token)
                 is Token.Operator -> {
                     while (opStack.isNotEmpty()) {
                         val top = opStack.last()
@@ -281,6 +302,10 @@ object CalculatorEngine {
                             } else {
                                 break
                             }
+                        } else if (top is Token.Unary) {
+                            // Exponentiation binds more tightly than a leading sign.
+                            if (token.symbol == '^') break
+                            output.add(opStack.removeLast())
                         } else if (top is Token.Function) {
                             output.add(opStack.removeLast())
                         } else {
@@ -311,11 +336,11 @@ object CalculatorEngine {
             }
         }
 
+        require(!expectsOperand) { "Niekompletne wyrażenie" }
         while (opStack.isNotEmpty()) {
             val top = opStack.removeLast()
             if (top is Token.OpenParen) {
-                // Silently pop unclosed parentheses for resilience or throw
-                // To support flexible calculations, just ignore or continue
+                throw IllegalArgumentException("Brak nawiasu zamykającego")
             } else {
                 output.add(top)
             }
@@ -324,27 +349,39 @@ object CalculatorEngine {
         return output
     }
 
-    private fun evaluatePostfix(postfix: List<Token>, angleUnit: AngleUnit): Double {
-        val valStack = ArrayDeque<Double>()
+    private data class Operand(val value: Double, val isPercent: Boolean = false)
 
+    private fun evaluatePostfix(postfix: List<Token>, angleUnit: AngleUnit): Double {
+        val stack = ArrayDeque<Operand>()
+        fun pop(): Operand {
+            require(stack.isNotEmpty()) { "Brak argumentu" }
+            return stack.removeLast()
+        }
+        fun push(value: Double, percent: Boolean = false) {
+            if (value.isNaN()) throw ArithmeticException("Wynik poza dziedziną funkcji")
+            if (!value.isFinite()) throw ArithmeticException("Przekroczono zakres liczbowy")
+            stack.addLast(Operand(value, percent))
+        }
         for (token in postfix) {
             when (token) {
-                is Token.Number -> valStack.addLast(token.value)
+                is Token.Number -> push(token.value)
+                is Token.Unary -> {
+                    val a = pop()
+                    push(if (token.symbol == '-') -a.value else a.value, a.isPercent)
+                }
                 is Token.Postfix -> {
-                    if (valStack.isEmpty()) throw IllegalArgumentException("Brak argumentu")
-                    val a = valStack.removeLast()
-                    val res = when (token.symbol) {
-                        '!' -> factorial(a)
-                        '%' -> a / 100.0
-                        else -> throw IllegalArgumentException("Nieznany operator postfix: ${token.symbol}")
+                    val a = pop().value
+                    when (token.symbol) {
+                        '!' -> push(factorial(a))
+                        '%' -> push(a / 100.0, percent = true)
                     }
-                    valStack.addLast(res)
                 }
                 is Token.Operator -> {
-                    if (valStack.size < 2) throw IllegalArgumentException("Niekompletne wyrażenie")
-                    val b = valStack.removeLast()
-                    val a = valStack.removeLast()
-                    val res = when (token.symbol) {
+                    val right = pop()
+                    val a = pop().value
+                    // Addition/subtraction use a percentage of the left operand.
+                    val b = if (right.isPercent && token.symbol in "+-") a * right.value else right.value
+                    val result = when (token.symbol) {
                         '+' -> a + b
                         '-' -> a - b
                         '*' -> a * b
@@ -353,22 +390,16 @@ object CalculatorEngine {
                             a / b
                         }
                         '^' -> a.pow(b)
-                        else -> throw IllegalArgumentException("Nieznany operator: ${token.symbol}")
+                        else -> throw IllegalArgumentException("Nieznany operator")
                     }
-                    valStack.addLast(res)
+                    push(result)
                 }
-                is Token.Function -> {
-                    if (valStack.isEmpty()) throw IllegalArgumentException("Brak argumentu dla funkcji ${token.name}")
-                    val a = valStack.removeLast()
-                    val res = evaluateFunction(token.name, a, angleUnit)
-                    valStack.addLast(res)
-                }
-                else -> {}
+                is Token.Function -> push(evaluateFunction(token.name, pop().value, angleUnit))
+                else -> throw IllegalArgumentException("Błędne wyrażenie")
             }
         }
-
-        if (valStack.isEmpty()) throw IllegalArgumentException("Puste wyrażenie")
-        return valStack.last()
+        require(stack.size == 1) { "Błędne wyrażenie" }
+        return stack.last().value
     }
 
     private fun evaluateFunction(name: String, arg: Double, angleUnit: AngleUnit): Double {
@@ -441,10 +472,10 @@ object CalculatorEngine {
         if (value.isInfinite()) return if (value > 0) "∞" else "-∞"
 
         // If the number is an exact integer within standard precision
-        val isExactInt = abs(value - round(value)) < 1e-12 && abs(value) < 1e15
+        val isExactInt = value == round(value) && abs(value) < 1e15
 
         if (decimalPlaces == 0 && abs(value) < 1e15) {
-            val rounded = round(value).toLong()
+            val rounded = BigDecimal.valueOf(value).setScale(0, RoundingMode.HALF_UP).toLong()
             return if (formatGrouping) formatWithGrouping(rounded.toString()) else rounded.toString()
         }
 
@@ -452,6 +483,7 @@ object CalculatorEngine {
             val df = DecimalFormat().apply {
                 maximumFractionDigits = decimalPlaces
                 minimumFractionDigits = decimalPlaces
+                roundingMode = RoundingMode.HALF_UP
                 isGroupingUsed = formatGrouping
                 decimalFormatSymbols = DecimalFormatSymbols(Locale.getDefault()).apply {
                     decimalSeparator = ','
