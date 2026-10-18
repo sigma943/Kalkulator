@@ -2,6 +2,7 @@
 
 Kalkulator na Androida napisany w Kotlinie i Jetpack Compose. Działa lokalnie,
 obsługuje historię, motywy, funkcje naukowe i przeliczanie jednostek.
+Kursy walut mogą być pobierane z NBP przez internet.
 
 ## Obliczenia
 
@@ -47,3 +48,30 @@ Można go też uruchomić ręcznie przez **Actions → Build Android APK → Run
 Gotowy APK znajduje się w artefakcie **Kalkulator-Debug-APK**, a raporty testów
 w **Unit-test-reports**. Tag `v*` dodatkowo tworzy GitHub Release z debug APK.
 APK debug służy do testowania; wydanie produkcyjne wymaga podpisu release.
+
+## Niezawodność przelicznika
+
+Przelicznik używa dziesiętnego `BigDecimal`: współczynniki są zapisane dokładnie,
+ilorazy liczone z 34 cyframi znaczącymi, a ekran pokazuje do 16 cyfr. Zmiana
+aktywnego wiersza przekazuje pełny wynik. Błędne dane otrzymują komunikat zamiast
+pozornego zera. Temperatura jest sprawdzana względem zera bezwzględnego.
+
+- Dane: kB/MB/GB są dziesiętne, KiB/MiB/GiB binarne; bajt i bit są rozróżniane.
+- Objętość: oddzielne US cup (236,5882365 ml), szklanka 250 ml i miarka 240 ml.
+- Systemy liczbowe: zapis całkowity BIN/OCT/DEC/HEX jest przeliczany przez `BigInteger`;
+  dostępne są przyciski A–F. Niedozwolone cyfry nie są przyjmowane.
+- Finanse: jednostką bazową jest netto/kwota bazowa; wyniki z VAT lub napiwkiem
+  zawierają ten dodatek. Rabaty mają osobną cenę bazową przed obniżką.
+- BMI ma osobny formularz masy w kg i wzrostu w cm; nie jest konwersją jednostek.
+- Miesiące i lata oznaczają średnie okresy: 30,4375 i 365,25 dnia, nie odstępy
+  między konkretnymi datami. Mach jest przybliżeniem dla powietrza przy 15°C,
+  a radiany używają przybliżenia π.
+- Waluty: tabela A NBP jest pobierana przez HTTPS wraz z datą publikacji.
+  W razie braku sieci można użyć zapisanej tabeli, maksymalnie sprzed 7 dni.
+  Starsza lub niekompletna tabela blokuje konwersję. Są to kursy średnie,
+  bez spreadu i prowizji. Kwoty i historia nie są wysyłane do NBP.
+
+Źródła definicji i danych:
+[NBP Web API](https://api.nbp.pl/),
+[NIST: przedrostki binarne](https://physics.nist.gov/cuu/Units/binary.html),
+[NIST: współczynniki konwersji](https://www.nist.gov/pml/special-publication-811/nist-guide-si-appendix-b-conversion-factors/nist-guide-si-appendix-b9).

@@ -110,9 +110,9 @@ class ExampleUnitTest {
         val grams = UnitConverterEngine.convert("mass", "kg", "g", 1.0)
         assertEquals(1000.0, grams, 0.001)
 
-        // 1 GB = 1024 MB
+        // Decimal SI prefixes: 1 GB = 1000 MB
         val mb = UnitConverterEngine.convert("data", "GB", "MB", 1.0)
-        assertEquals(1024.0, mb, 0.001)
+        assertEquals(1000.0, mb, 0.001)
     }
 
     @Test

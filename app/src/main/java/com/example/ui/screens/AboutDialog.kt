@@ -165,7 +165,7 @@ fun PrivacyPolicyDialog(onDismiss: () -> Unit) {
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Text(
-                    text = "Aplikacja Kalkulator działa w 100% lokalnie na Twoim urządzeniu. Nie zbiera, nie przetwarza ani nie przesyła żadnych danych osobowych ani informacji o obliczeniach.",
+                    text = "Obliczenia, historia i przeliczanie jednostek działają lokalnie. Przelicznik walut łączy się przez HTTPS z api.nbp.pl, aby pobrać tabelę kursów. Nie wysyła wpisanych kwot ani historii obliczeń. Dostawca usługi widzi standardowe dane połączenia, w tym adres IP.",
                     fontSize = 14.sp,
                     lineHeight = 20.sp
                 )

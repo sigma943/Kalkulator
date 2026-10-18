@@ -47,7 +47,7 @@ import com.example.ui.screens.HelpDialog
 import com.example.ui.screens.PrivacyPolicyDialog
 import com.example.ui.screens.ThemeSelectionDialog
 import com.example.ui.theme.LocalCalculatorPalette
-import java.util.Calendar
+import kotlinx.coroutines.CancellationException
 
 @Composable
 fun UnitConverterScreen(
@@ -356,13 +356,17 @@ private fun ConverterDetailView(
     vibrateEnabled: Boolean,
     soundEnabled: Boolean
 ) {
+    if (category.id == "bmi") {
+        BmiDetailView(onBack)
+        return
+    }
     val palette = LocalCalculatorPalette.current
     val context = LocalContext.current
 
     var fromUnitIndex by remember(category.id) { mutableIntStateOf(0) }
     var toUnitIndex by remember(category.id) { mutableIntStateOf(1.coerceAtMost(category.units.size - 1)) }
-    var activeRow by remember { mutableIntStateOf(0) } // 0 = row1 (from), 1 = row2 (to)
-    var inputValue by remember { mutableStateOf("1") }
+    var activeRow by remember(category.id) { mutableIntStateOf(0) } // 0 = row1 (from), 1 = row2 (to)
+    var inputValue by remember(category.id) { mutableStateOf("1") }
 
     var showFromDialog by remember { mutableStateOf(false) }
     var showToDialog by remember { mutableStateOf(false) }
@@ -370,28 +374,69 @@ private fun ConverterDetailView(
     val fromUnit = category.units.getOrElse(fromUnitIndex) { category.units.first() }
     val toUnit = category.units.getOrElse(toUnitIndex) { category.units.last() }
 
-    val numericVal = inputValue.replace(',', '.').toDoubleOrNull() ?: 0.0
-
-    val convertedValue = remember(category.id, fromUnit.id, toUnit.id, numericVal, activeRow) {
-        if (activeRow == 0) {
-            val res = UnitConverterEngine.convert(category.id, fromUnit.id, toUnit.id, numericVal)
-            UnitConverterEngine.formatConvertedValue(res)
-        } else {
-            val res = UnitConverterEngine.convert(category.id, toUnit.id, fromUnit.id, numericVal)
-            UnitConverterEngine.formatConvertedValue(res)
+    val currencyRepository = remember(context) { CurrencyRateRepository(context) }
+    var snapshot by remember { mutableStateOf(currencyRepository.cached()) }
+    var refreshRequest by remember { mutableIntStateOf(0) }
+    var refreshing by remember { mutableStateOf(false) }
+    var rateMessage by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(category.id, refreshRequest) {
+        if (category.id == "currency") {
+            refreshing = true
+            rateMessage = null
+            try {
+                snapshot = currencyRepository.refresh()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                snapshot = currencyRepository.cached()
+                rateMessage = if (snapshot == null) "Brak kursów NBP. Sprawdź połączenie i odśwież."
+                    else "Brak połączenia — używam zapisanej tabeli."
+            } finally {
+                refreshing = false
+            }
         }
+    }
+    val inputUnit = if (activeRow == 0) fromUnit else toUnit
+    val outputUnit = if (activeRow == 0) toUnit else fromUnit
+    val conversion = remember(category.id, inputUnit.id, outputUnit.id, inputValue, snapshot) {
+        UnitConverterEngine.convertText(category.id, inputUnit.id, outputUnit.id, inputValue, snapshot?.takeIf { it.isUsable() }?.rates ?: emptyMap())
+    }
+    val convertedValue = (conversion as? UnitConverterEngine.Result.Success)?.display ?: "—"
+    val conversionError = (conversion as? UnitConverterEngine.Result.Error)?.message
+
+    fun copyResult() {
+        val result = conversion as? UnitConverterEngine.Result.Success
+        if (result == null) {
+            Toast.makeText(context, conversionError ?: "Brak wyniku", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val text = "${result.display} ${outputUnit.symbol}"
+        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        clipboard.setPrimaryClip(ClipData.newPlainText("Wynik", text))
+        Toast.makeText(context, "Skopiowano: $text", Toast.LENGTH_SHORT).show()
+    }
+
+    fun activateRow(row: Int) {
+        if (row == activeRow) return
+        val result = conversion as? UnitConverterEngine.Result.Success ?: return
+        // Transfer the unrounded result instead of reinterpreting the original input.
+        inputValue = if (category.id == "numeral") result.raw else
+            UnitConverterEngine.parseDecimal(result.raw).toPlainString().replace('.', ',')
+        activeRow = row
     }
 
     // Input handlers
     fun handleDigit(d: String) {
-        if (inputValue == "0") {
-            inputValue = d
-        } else if (inputValue.length < 15) {
-            inputValue += d
+        if (category.id == "numeral") {
+            val radix = UnitConverterEngine.numeralRadix(inputUnit.id)
+            if (!d.all { Character.digit(it, radix) in 0 until radix }) return
         }
+        if (inputValue == "0") inputValue = d
+        else if (inputValue.length + d.length <= 128) inputValue += d
     }
 
     fun handleDot() {
+        if (category.id == "numeral" || inputValue.contains('E', ignoreCase = true)) return
         if (!inputValue.contains(".") && !inputValue.contains(",")) {
             inputValue = if (inputValue.isEmpty()) "0," else "$inputValue,"
         }
@@ -438,6 +483,34 @@ private fun ConverterDetailView(
             )
         }
 
+        val note = when (category.id) {
+            "currency" -> snapshot?.let { "NBP, kurs średni z ${it.date}. Bez spreadu i prowizji." } ?: "Kursy średnie NBP"
+            "data" -> "kB/MB/GB: wielokrotności 1000; KiB/MiB/GiB: wielokrotności 1024."
+            "date", "time" -> "Miesiąc = średnio 30,4375 dnia; rok = 365,25 dnia. To okresy, nie daty kalendarzowe."
+            "finance" -> "Wybierz kwotę bazową/netto lub kwotę z wybranym VAT/napiwkiem."
+            "discount" -> "Wybierz cenę przed rabatem lub cenę po określonym rabacie."
+            "speed" -> "Mach: stałe przybliżenie 340,29 m/s dla powietrza przy 15°C."
+            "angle" -> "Radiany wykorzystują przybliżenie π."
+            "numeral" -> "Liczby całkowite. HEX obsługuje cyfry A–F."
+            else -> null
+        }
+        if (note != null) Text(note, color = palette.numberText, fontSize = 12.sp,
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 2.dp))
+        if (category.id == "currency") {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(rateMessage ?: if (refreshing) "Pobieranie kursów…" else "Tabela NBP; kursy mogą pochodzić z poprzedniego dnia roboczego.",
+                    modifier = Modifier.weight(1f), fontSize = 11.sp, color = palette.numberText)
+                TextButton(onClick = { refreshRequest++ }, enabled = !refreshing) { Text("Odśwież") }
+            }
+        }
+        if (conversionError != null) Text(conversionError, color = MaterialTheme.colorScheme.error,
+            fontSize = 12.sp, modifier = Modifier.padding(horizontal = 20.dp, vertical = 2.dp).testTag("converter_error"))
+        if (category.id == "numeral" && inputUnit.id == "hex") {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                "ABCDEF".forEach { digit -> TextButton(onClick = { handleDigit(digit.toString()) }) { Text(digit.toString()) } }
+            }
+        }
+
         // Górny panel wartości i jednostek (dokładnie jak na zrzucie ekranu 2)
         Column(
             modifier = Modifier
@@ -451,7 +524,7 @@ private fun ConverterDetailView(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(12.dp))
-                    .clickable { activeRow = 0 }
+                    .clickable { activateRow(0) }
                     .padding(vertical = 10.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
@@ -504,7 +577,7 @@ private fun ConverterDetailView(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(12.dp))
-                    .clickable { activeRow = 1 }
+                    .clickable { activateRow(1) }
                     .padding(vertical = 10.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
@@ -609,8 +682,11 @@ private fun ConverterDetailView(
                     vibrateEnabled = vibrateEnabled,
                     soundEnabled = soundEnabled,
                     onClick = {
-                        val v = inputValue.toDoubleOrNull() ?: 0.0
-                        inputValue = (v / 100.0).toString()
+                        if (category.id != "numeral") {
+                            runCatching { UnitConverterEngine.percentInput(inputValue) }
+                                .onSuccess { inputValue = it.replace('.', ',') }
+                                .onFailure { Toast.makeText(context, "Niepoprawna liczba", Toast.LENGTH_SHORT).show() }
+                        }
                     }
                 )
                 CalculatorButton(
@@ -690,10 +766,7 @@ private fun ConverterDetailView(
                     vibrateEnabled = vibrateEnabled,
                     soundEnabled = soundEnabled,
                     onClick = {
-                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                        val clip = ClipData.newPlainText("Wynik", "$convertedValue ${toUnit.symbol}")
-                        clipboard.setPrimaryClip(clip)
-                        Toast.makeText(context, "Skopiowano: $convertedValue ${toUnit.symbol}", Toast.LENGTH_SHORT).show()
+                        copyResult()
                     }
                 )
             }
@@ -740,10 +813,7 @@ private fun ConverterDetailView(
                     vibrateEnabled = vibrateEnabled,
                     soundEnabled = soundEnabled,
                     onClick = {
-                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                        val clip = ClipData.newPlainText("Wynik", "$convertedValue ${toUnit.symbol}")
-                        clipboard.setPrimaryClip(clip)
-                        Toast.makeText(context, "Skopiowano: $convertedValue ${toUnit.symbol}", Toast.LENGTH_SHORT).show()
+                        copyResult()
                     }
                 )
             }
