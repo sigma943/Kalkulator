@@ -118,6 +118,7 @@ class UnitConverterReliabilityTest {
     }
 
     @Test fun commaAndPercentageDoNotLoseFraction() {
+        assertThrows(IllegalArgumentException::class.java) { Engine.percentInput("1E-1000") }
         exact("12.5", Engine.parseDecimal("12,5"))
         exact("0.125", BigDecimal(Engine.percentInput("12,5")))
         exact("0.000000000000000001", BigDecimal(Engine.percentInput("0,0000000000000001")))

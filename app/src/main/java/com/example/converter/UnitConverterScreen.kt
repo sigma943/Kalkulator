@@ -421,7 +421,9 @@ private fun ConverterDetailView(
         val result = conversion as? UnitConverterEngine.Result.Success ?: return
         // Transfer the unrounded result instead of reinterpreting the original input.
         inputValue = if (category.id == "numeral") result.raw else
-            UnitConverterEngine.parseDecimal(result.raw).toPlainString().replace('.', ',')
+            result.raw.toBigDecimal().toPlainString().let { plain ->
+                (if (plain.length <= 256) plain else result.raw).replace('.', ',')
+            }
         activeRow = row
     }
 

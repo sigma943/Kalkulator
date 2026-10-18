@@ -375,7 +375,12 @@ object UnitConverterEngine {
         return weight.divide(height.multiply(height), precision)
     }
 
-    fun percentInput(input: String): String = parseDecimal(input).movePointLeft(2).stripTrailingZeros().toPlainString()
+    fun percentInput(input: String): String {
+        val value = parseDecimal(input).movePointLeft(2).stripTrailingZeros()
+        require(value.scale() in -1000..1000) { "Liczba poza obsługiwanym zakresem" }
+        val plain = value.toPlainString()
+        return if (plain.length <= 256) plain else value.toString()
+    }
 
     fun convertAll(categoryId: String, fromUnitId: String, value: Double): List<Pair<ConversionUnit, String>> {
         val category = categories.find { it.id == categoryId } ?: throw IllegalArgumentException("Nieznana kategoria")
