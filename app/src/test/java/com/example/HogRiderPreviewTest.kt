@@ -56,6 +56,8 @@ class HogRiderPreviewTest {
         compose.onNodeWithTag("hog_rider_portrait").performClick()
         compose.mainClock.advanceTimeBy(240)
         preview("tap-fire-burst")
+        compose.mainClock.advanceTimeBy(1200)
+        preview("demolition-fireworks")
         compose.onNodeWithTag("hog_rider_close").performClick()
         assertTrue(dismissed)
     }
@@ -68,7 +70,7 @@ class HogRiderPreviewTest {
         } }
         compose.mainClock.advanceTimeBy(1400)
         preview("landscape")
-        compose.mainClock.advanceTimeBy(5500)
+        compose.mainClock.advanceTimeBy(7500)
         assertTrue(dismissed)
     }
 }

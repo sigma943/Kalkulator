@@ -18,11 +18,10 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
@@ -40,7 +39,7 @@ import kotlin.random.Random
 private val RiderGold = Color(0xFFFFCE75)
 private val RiderCream = Color(0xFFFFF2D5)
 private val RiderFire = Color(0xFFFF4B16)
-private const val ShowDurationMillis = 6000f
+private const val ShowDurationMillis = 8000f
 private data class RiderSpark(val x: Float, val y: Float, val speed: Float, val size: Float)
 
 /** A single clock drives the scene; particles are bounded and never accumulate on taps. */
@@ -90,123 +89,143 @@ fun HogRiderEasterEggOverlay(
     val burst = if (reducedMotion) 1f else ((elapsed - burstAt) / 950f).coerceIn(0f, 1f)
     val impact = if (reducedMotion) 0f else sin(burst * PI.toFloat()) * (1f - burst)
 
+    // Automatic impacts drive the demolition even without tapping.
+    val beat = if (reducedMotion) 1f else ((time - 0.65f).coerceAtLeast(0f) % 1.35f) / 1.35f
+    val slam = if (reducedMotion || time < 0.65f) 0f else (1f - beat * 5f).coerceIn(0f, 1f)
+    val force = maxOf(slam, impact)
+
     BoxWithConstraints(
         modifier = modifier.fillMaxSize().zIndex(9999f)
             .background(Color(0xFF080B16)).testTag("hog_rider_overlay")
     ) {
-        val sceneWidth = maxWidth
-        val sceneHeight = maxHeight
-        val heroSize = minOf(sceneWidth * 0.9f, sceneHeight * 0.60f, 420.dp)
-        Canvas(Modifier.fillMaxSize().graphicsLayer { alpha = exit }) {
-            val center = Offset(size.width * 0.5f, size.height * 0.47f)
-            val halo = minOf(size.width * 0.68f, size.height * 0.36f)
-            drawRect(Brush.radialGradient(listOf(Color(0xFF4A1B15), Color(0xFF080B16)), center, halo * 1.8f))
-            drawCircle(Brush.radialGradient(listOf(RiderGold.copy(alpha = 0.16f), Color.Transparent),
-                center, halo), halo, center)
-            // Layered flame tongues form a moving corona behind the rider.
-            val flameTime = if (reducedMotion) 0.7f else time
-            repeat(32) { index ->
-                val angle = index * 2f * PI.toFloat() / 32f
-                val flicker = 0.5f + 0.5f * sin(flameTime * 8f + index * 2.7f)
-                val base = halo * 0.62f
-                val reach = halo * (0.86f + flicker * 0.30f + impact * 0.3f)
-                val spread = 0.075f
-                val flame = Path().apply {
-                    moveTo(center.x + cos(angle - spread) * base, center.y + sin(angle - spread) * base)
-                    quadraticTo(center.x + cos(angle - 0.15f) * reach * 0.9f,
-                        center.y + sin(angle - 0.15f) * reach * 0.9f,
-                        center.x + cos(angle) * reach, center.y + sin(angle) * reach)
-                    quadraticTo(center.x + cos(angle + 0.12f) * reach * 0.8f,
-                        center.y + sin(angle + 0.12f) * reach * 0.8f,
-                        center.x + cos(angle + spread) * base, center.y + sin(angle + spread) * base)
-                    close()
-                }
-                drawPath(flame, Brush.radialGradient(
-                    listOf(RiderCream, RiderGold, RiderFire.copy(alpha = 0.75f), Color.Transparent),
-                    center, reach * 1.08f), alpha = 0.85f * ease)
+        val heroWidth = minOf(maxWidth * 0.86f, maxHeight * 0.62f, 420.dp)
+        Canvas(Modifier.fillMaxSize().graphicsLayer {
+            alpha = exit
+            translationX = sin(time * 63f) * force * 6.dp.toPx()
+            translationY = cos(time * 51f) * force * 4.dp.toPx()
+        }) {
+            val center = Offset(size.width * 0.5f, size.height * 0.48f)
+            val span = minOf(size.width, size.height)
+            drawRect(Brush.radialGradient(listOf(Color(0xFF5C1B14), Color(0xFF080B16)), center, span))
+            // Fast radial streaks sell the charge before the first impact.
+            if (!reducedMotion) repeat(28) { i ->
+                val angle = i * 2f * PI.toFloat() / 28f + 0.12f * sin(time)
+                val travel = (time * 1.6f + i * 0.173f) % 1f
+                val start = center + Offset(cos(angle), sin(angle)) * span * (0.35f + travel)
+                val end = start + Offset(cos(angle), sin(angle)) * span * 0.22f
+                drawLine(RiderGold.copy(alpha = (1f - travel) * 0.32f), start, end, 1.dp.toPx())
             }
-            // Soft orange aura and a hot core keep the fire from looking like flat triangles.
-            drawCircle(Brush.radialGradient(listOf(RiderGold.copy(alpha = 0.22f),
-                RiderFire.copy(alpha = 0.18f), Color.Transparent), center, halo * 1.25f), halo * 1.25f, center)
-            drawCircle(RiderGold.copy(alpha = 0.65f * ease), halo * 0.63f, center,
-                style = Stroke(2.dp.toPx()))
-            // Low flames lick upward from the ground, with a fixed particle budget.
-            repeat(24) { index ->
-                val phase = (flameTime * 0.9f + index * 0.137f) % 1f
-                val x = size.width * (index + 0.5f) / 24f
-                val y = size.height - phase * size.height * 0.22f
-                val radius = (10f + 14f * (1f - phase)).dp.toPx()
-                drawCircle(Brush.radialGradient(listOf(RiderGold.copy(alpha = (1f - phase) * 0.6f),
-                    RiderFire.copy(alpha = (1f - phase) * 0.4f), Color.Transparent), Offset(x, y), radius), radius, Offset(x, y))
-            }
-            sparks.forEachIndexed { index, spark ->
-                val y = ((spark.y - time * spark.speed) % 1f + 1f) % 1f
-                val x = spark.x * size.width + sin(time * 0.7f + index) * 8.dp.toPx()
-                drawCircle(if (index % 4 == 0) RiderFire.copy(alpha = 0.8f) else RiderGold.copy(alpha = 0.65f),
-                    spark.size.dp.toPx(), Offset(x, y * size.height))
-            }
-            // Tap shockwave and a fixed set of sparks: no growing particle lists.
-            if (burst < 1f) {
-                drawCircle(RiderGold.copy(alpha = (1f - burst) * 0.65f),
-                    halo * (0.35f + burst * 1.1f), center, style = Stroke(2.dp.toPx()))
-                repeat(26) { index ->
-                    val angle = index / 26f * 2f * PI.toFloat()
-                    val distance = halo * (0.25f + burst * (0.8f + (index % 3) * 0.12f))
-                    val start = center + Offset(cos(angle) * distance, sin(angle) * distance + burst * burst * 50.dp.toPx())
-                    val end = start + Offset(cos(angle) * 10.dp.toPx(), sin(angle) * 10.dp.toPx())
-                    drawLine(RiderCream.copy(alpha = (1f - burst) * 0.9f), start, end, 2.dp.toPx(), StrokeCap.Round)
+            // A skyline of blocks breaks apart and flies away on every automatic slam.
+            repeat(36) { i ->
+                val column = i % 12
+                val row = i / 12
+                val width = size.width / 12f
+                val flight = if (reducedMotion) 0f else beat
+                val base = Offset((column + 0.5f) * width, size.height * 0.84f - row * width * 0.65f)
+                val spread = (column - 5.5f) * span * 0.12f * flight
+                val lift = sin(flight * PI.toFloat()) * span * (0.3f + row * 0.1f)
+                val position = base + Offset(spread, -lift + flight * flight * span * 0.2f)
+                rotate(if (reducedMotion) 0f else (i % 2 * 2 - 1) * flight * 260f, position) {
+                    drawRect(Color(0xFF302F3E), position - Offset(width * 0.4f, width * 0.25f),
+                        androidx.compose.ui.geometry.Size(width * 0.8f, width * 0.5f))
+                    drawLine(RiderFire.copy(alpha = 0.8f), position - Offset(width * 0.4f, width * 0.25f),
+                        position + Offset(width * 0.4f, -width * 0.25f), 2.dp.toPx())
                 }
             }
-            // Grounding shadow follows the portrait, rather than shaking the whole screen.
-            drawOval(Brush.radialGradient(listOf(Color.Black.copy(alpha = 0.7f), Color.Transparent),
-                Offset(center.x, center.y + heroSize.toPx() * 0.48f), heroSize.toPx() * 0.55f),
-                topLeft = Offset(center.x - heroSize.toPx() * 0.45f, center.y + heroSize.toPx() * 0.38f),
-                size = Size(heroSize.toPx() * 0.9f, heroSize.toPx() * 0.22f))
+            // Turbulent fire jets rise from the base rather than forming a static petal ring.
+            repeat(42) { i ->
+                val age = if (reducedMotion) (i * 0.117f) % 1f else (time * 1.4f + i * 0.117f) % 1f
+                val x = size.width * ((i * 0.618f) % 1f) + sin(time * 8f + i) * 12.dp.toPx()
+                val y = size.height * 0.94f - age * span * (0.6f + i % 4 * 0.12f)
+                val radius = span * (0.025f + (1f - age) * 0.055f)
+                val point = Offset(x, y)
+                drawCircle(Brush.radialGradient(listOf(RiderGold.copy(alpha = (1f - age) * 0.85f),
+                    RiderFire.copy(alpha = (1f - age) * 0.55f), Color.Transparent), point, radius), radius, point)
+            }
+            // Staggered fireworks: rockets, expanding trails, gravity and fading embers.
+            if (!reducedMotion) repeat(7) { shell ->
+                val cycle = (time * 0.62f + shell * 0.193f) % 1f
+                val origin = Offset(size.width * (0.12f + ((shell * 0.381f) % 0.76f)),
+                    size.height * (0.16f + (shell % 3) * 0.22f))
+                val color = listOf(RiderGold, Color(0xFF52E7FF), Color(0xFFFF68C8), RiderFire)[shell % 4]
+                if (cycle < 0.18f) {
+                    val rocket = origin + Offset(0f, (1f - cycle / 0.18f) * span * 0.65f)
+                    drawLine(color.copy(alpha = 0.65f), rocket, rocket + Offset(0f, 26.dp.toPx()), 2.dp.toPx())
+                } else {
+                    val age = (cycle - 0.18f) / 0.82f
+                    val radius = span * 0.44f * (1f - (1f - age) * (1f - age))
+                    val fall = span * age * age * 0.24f
+                    repeat(32) { particle ->
+                        val angle = particle * 2f * PI.toFloat() / 32f + shell
+                        val direction = Offset(cos(angle), sin(angle))
+                        val point = origin + direction * radius * (0.7f + particle % 3 * 0.15f) + Offset(0f, fall)
+                        val tail = point - direction * span * (0.025f + age * 0.05f)
+                        drawLine(color.copy(alpha = (1f - age) * 0.22f), tail, point, 6.dp.toPx(), StrokeCap.Round)
+                        drawLine(color.copy(alpha = 1f - age), tail, point, 1.4f.dp.toPx(), StrokeCap.Round)
+                        drawCircle(RiderCream.copy(alpha = 1f - age), 1.5f.dp.toPx(), point)
+                    }
+                }
+            }
+            sparks.forEachIndexed { i, spark ->
+                val travel = ((spark.y - time * spark.speed * 5f) % 1f + 1f) % 1f
+                val point = Offset(spark.x * size.width, travel * size.height)
+                drawLine(RiderGold.copy(alpha = 0.65f), point,
+                    point + Offset(sin(i.toFloat()) * 4.dp.toPx(), 7.dp.toPx()), spark.size.dp.toPx())
+            }
+            if (!reducedMotion) {
+                val wave = minOf(beat * 1.8f, 1f)
+                drawCircle(RiderFire.copy(alpha = (1f - wave) * 0.65f), span * (0.1f + wave * 0.95f), center,
+                    style = Stroke((1f + (1f - wave) * 6f).dp.toPx()))
+                if (burst < 1f) repeat(48) { i ->
+                    val angle = i * 2f * PI.toFloat() / 48f
+                    val direction = Offset(cos(angle), sin(angle))
+                    val point = center + direction * span * burst * (0.7f + i % 4 * 0.1f)
+                    drawLine(RiderCream.copy(alpha = 1f - burst), point, point + direction * 18.dp.toPx(), 2.dp.toPx())
+                }
+            }
         }
 
-        Image(painter = painterResource(R.drawable.hog_rider), contentDescription = "Hog Rider — dotknij, aby wywołać ogień i lasery",
-            contentScale = ContentScale.Fit,
-            modifier = Modifier.align(Alignment.Center)
-                .offset(y = -(sceneHeight * 0.03f)).size(heroSize)
-                .graphicsLayer {
-                    alpha = ease * exit
-                    val sizeScale = (0.35f + ease * 0.65f) * (1f + impact * 0.15f)
-                    scaleX = sizeScale; scaleY = sizeScale
-                    translationY = (1f - ease) * 70.dp.toPx() + sin(time * 7f) * 4.dp.toPx()
-                    rotationZ = sin(time * 3f) * 1.5f + impact * 5f
+        // Image and laser emitters share ONE layer: all movement, scale and rotation stay locked.
+        Box(Modifier.align(Alignment.Center).offset(y = -(maxHeight * 0.02f))
+            .size(width = heroWidth, height = heroWidth * (207f / 220f))
+            .graphicsLayer {
+                alpha = ease * exit
+                val surge = if (reducedMotion) 0f else sin(time * 9f) * 0.025f + force * 0.11f
+                scaleX = (0.35f + ease * 0.65f) * (1f + surge)
+                scaleY = scaleX
+                translationX = if (reducedMotion) 0f else sin(time * 4.5f) * 12.dp.toPx() + sin(time * 59f) * force * 5.dp.toPx()
+                translationY = (1f - ease) * 100.dp.toPx() + sin(time * 9f) * 9.dp.toPx() - force * 15.dp.toPx()
+                rotationZ = if (reducedMotion) 0f else sin(time * 4.5f) * 4f + sin(time * 19f) * force * 3f
+            }
+            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
+                if (elapsed - lastTapAt >= 180f) {
+                    lastTapAt = elapsed
+                    burstAt = elapsed
+                    if (vibrateEnabled) view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                    runCatching { tone?.startTone(ToneGenerator.TONE_PROP_BEEP, 70) }
                 }
-                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
-                    if (elapsed - lastTapAt >= 180f) {
-                        lastTapAt = elapsed
-                        burstAt = elapsed
-                        if (vibrateEnabled) view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-                        runCatching { tone?.startTone(ToneGenerator.TONE_PROP_BEEP, 70) }
-                    }
-                }.testTag("hog_rider_portrait"))
-        Canvas(Modifier.fillMaxSize().graphicsLayer { alpha = ease * exit }) {
-            val hero = heroSize.toPx()
-            val center = Offset(size.width / 2f, size.height * 0.47f)
-            val scale = (0.35f + ease * 0.65f) * (1f + impact * 0.15f)
-            val rotation = (sin(time * 3f) * 1.5f + impact * 5f) * PI.toFloat() / 180f
-            val bob = (1f - ease) * 70.dp.toPx() + sin(time * 7f) * 4.dp.toPx()
-            // A smooth charge/fire cycle avoids full-screen flashes.
-            val cycle = if (reducedMotion) 0f else ((time - 0.8f).coerceAtLeast(0f) % 1.8f)
-            val charge = if (reducedMotion || time < 0.8f) 0f else
-                (cycle / 0.2f).coerceIn(0f, 1f) * ((1.1f - cycle) / 0.3f).coerceIn(0f, 1f)
-            val power = maxOf(charge, impact * 2f).coerceIn(0f, 1f)
-            if (power > 0f) {
-                repeat(2) { eye ->
-                    val local = Offset(hero * (0.094f + eye * 0.052f) * scale, -hero * 0.335f * scale)
-                    val origin = center + Offset(local.x * cos(rotation) - local.y * sin(rotation),
-                        local.x * sin(rotation) + local.y * cos(rotation) + bob)
-                    val target = Offset(size.width * (if (eye == 0) -0.1f else 1.1f),
-                        size.height * (0.24f + 0.12f * sin(time * 1.6f + eye)))
-                    drawLine(RiderFire.copy(alpha = power * 0.12f), origin, target, 26.dp.toPx(), StrokeCap.Round)
-                    drawLine(RiderFire.copy(alpha = power * 0.32f), origin, target, 12.dp.toPx(), StrokeCap.Round)
-                    drawLine(RiderGold.copy(alpha = power * 0.9f), origin, target, 4.dp.toPx(), StrokeCap.Round)
-                    drawLine(RiderCream.copy(alpha = power), origin, target, 1.5f.dp.toPx(), StrokeCap.Round)
+            }.testTag("hog_rider_portrait")) {
+            Image(painterResource(R.drawable.hog_rider),
+                contentDescription = "Hog Rider — dotknij, aby wywołać eksplozję",
+                contentScale = ContentScale.FillBounds, modifier = Modifier.fillMaxSize())
+            Canvas(Modifier.matchParentSize()) {
+                val power = if (reducedMotion || time < 0.65f) 0f else
+                    (0.65f + 0.25f * sin(time * 7f) + force).coerceIn(0f, 1f)
+                if (power > 0f) repeat(2) { eye ->
+                    // Measured pixel centers in the original 220 x 207 bitmap, without letterboxing.
+                    val origin = if (eye == 0) Offset(size.width * 139f / 220f, size.height * 31f / 207f)
+                        else Offset(size.width * 151f / 220f, size.height * 37f / 207f)
+                    val sweep = sin(time * 3.8f) * size.height * 0.85f
+                    val target = Offset(if (eye == 0) -size.width * 1.5f else size.width * 2.5f,
+                        size.height * 0.25f + sweep)
+                    drawLine(RiderFire.copy(alpha = power * 0.18f), origin, target, 18.dp.toPx(), StrokeCap.Round)
+                    drawLine(RiderFire.copy(alpha = power * 0.55f), origin, target, 8.dp.toPx(), StrokeCap.Round)
+                    drawLine(RiderGold.copy(alpha = power), origin, target, 3.dp.toPx(), StrokeCap.Round)
+                    drawLine(RiderCream.copy(alpha = power), origin, target, 1.dp.toPx(), StrokeCap.Round)
+                    val glow = 7.dp.toPx()
                     drawCircle(Brush.radialGradient(listOf(RiderCream.copy(alpha = power),
-                        RiderFire.copy(alpha = power * 0.65f), Color.Transparent), origin, 18.dp.toPx()), 18.dp.toPx(), origin)
+                        RiderFire.copy(alpha = power * 0.8f), Color.Transparent), origin, glow), glow, origin)
+                    drawCircle(RiderCream.copy(alpha = power), 1.8f.dp.toPx(), origin)
                 }
             }
         }
