@@ -6,6 +6,7 @@ import android.graphics.Canvas
 import androidx.activity.ComponentActivity
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import com.example.ui.components.HogRiderEasterEggOverlay
@@ -47,11 +48,14 @@ class HogRiderPreviewTest {
         compose.setContent { MaterialTheme {
             HogRiderEasterEggOverlay(onDismiss = { dismissed = true }, soundEnabled = false, vibrateEnabled = false)
         } }
-        compose.mainClock.advanceTimeBy(1900)
-        preview("portrait")
+        compose.mainClock.advanceTimeBy(1400)
+        preview("portrait-fire-lasers")
+        listOf("SEKRET ODBLOKOWANY", "HOG RIDER", "Mały sekret. Wielkie wejście.", "DOTKNIJ JEŹDŹCA").forEach {
+            compose.onNodeWithText(it).assertDoesNotExist()
+        }
         compose.onNodeWithTag("hog_rider_portrait").performClick()
         compose.mainClock.advanceTimeBy(240)
-        preview("tap-sparks")
+        preview("tap-fire-burst")
         compose.onNodeWithTag("hog_rider_close").performClick()
         assertTrue(dismissed)
     }
@@ -62,9 +66,9 @@ class HogRiderPreviewTest {
         compose.setContent { MaterialTheme {
             HogRiderEasterEggOverlay(onDismiss = { dismissed = true }, soundEnabled = false, vibrateEnabled = false)
         } }
-        compose.mainClock.advanceTimeBy(1900)
+        compose.mainClock.advanceTimeBy(1400)
         preview("landscape")
-        compose.mainClock.advanceTimeBy(5000)
+        compose.mainClock.advanceTimeBy(5500)
         assertTrue(dismissed)
     }
 }

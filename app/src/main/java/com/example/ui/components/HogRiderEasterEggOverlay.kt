@@ -10,20 +10,18 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
@@ -31,9 +29,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import com.example.R
 import kotlin.math.PI
@@ -43,7 +39,7 @@ import kotlin.random.Random
 
 private val RiderGold = Color(0xFFFFCE75)
 private val RiderCream = Color(0xFFFFF2D5)
-private val RiderViolet = Color(0xFF9A81FF)
+private val RiderFire = Color(0xFFFF4B16)
 private const val ShowDurationMillis = 6000f
 private data class RiderSpark(val x: Float, val y: Float, val speed: Float, val size: Float)
 
@@ -66,7 +62,7 @@ fun HogRiderEasterEggOverlay(
     var lastTapAt by remember { mutableFloatStateOf(-1000f) }
     val sparks = remember {
         val random = Random(943)
-        List(44) { RiderSpark(random.nextFloat(), random.nextFloat(),
+        List(72) { RiderSpark(random.nextFloat(), random.nextFloat(),
             0.025f + random.nextFloat() * 0.045f, 0.8f + random.nextFloat() * 1.8f) }
     }
     val tone = remember(soundEnabled) {
@@ -100,27 +96,53 @@ fun HogRiderEasterEggOverlay(
     ) {
         val sceneWidth = maxWidth
         val sceneHeight = maxHeight
-        val compact = sceneWidth > sceneHeight
-        val heroSize = minOf(sceneWidth * 0.8f, sceneHeight * 0.44f, 360.dp)
+        val heroSize = minOf(sceneWidth * 0.9f, sceneHeight * 0.60f, 420.dp)
         Canvas(Modifier.fillMaxSize().graphicsLayer { alpha = exit }) {
-            val center = Offset(size.width * (if (compact) 0.28f else 0.5f), size.height * 0.47f)
+            val center = Offset(size.width * 0.5f, size.height * 0.47f)
             val halo = minOf(size.width * 0.68f, size.height * 0.36f)
-            drawRect(Brush.radialGradient(listOf(Color(0xFF30234A), Color(0xFF080B16)), center, halo * 1.8f))
+            drawRect(Brush.radialGradient(listOf(Color(0xFF4A1B15), Color(0xFF080B16)), center, halo * 1.8f))
             drawCircle(Brush.radialGradient(listOf(RiderGold.copy(alpha = 0.16f), Color.Transparent),
                 center, halo), halo, center)
-            // Slow orbital arcs leave the portrait legible, with a restrained violet counterlight.
-            repeat(3) { index ->
-                val radius = halo * (0.62f + index * 0.12f)
-                drawArc(if (index == 1) RiderViolet.copy(alpha = 0.35f) else RiderGold.copy(alpha = 0.38f),
-                    startAngle = time * (if (index == 1) -13f else 10f) + index * 100f,
-                    sweepAngle = if (index == 1) 100f else 68f, useCenter = false,
-                    topLeft = center - Offset(radius, radius), size = Size(radius * 2f, radius * 2f),
-                    style = Stroke(width = (if (index == 1) 1.2f else 2f).dp.toPx(), cap = StrokeCap.Round))
+            // Layered flame tongues form a moving corona behind the rider.
+            val flameTime = if (reducedMotion) 0.7f else time
+            repeat(32) { index ->
+                val angle = index * 2f * PI.toFloat() / 32f
+                val flicker = 0.5f + 0.5f * sin(flameTime * 8f + index * 2.7f)
+                val base = halo * 0.62f
+                val reach = halo * (0.86f + flicker * 0.30f + impact * 0.3f)
+                val spread = 0.075f
+                val flame = Path().apply {
+                    moveTo(center.x + cos(angle - spread) * base, center.y + sin(angle - spread) * base)
+                    quadraticTo(center.x + cos(angle - 0.15f) * reach * 0.9f,
+                        center.y + sin(angle - 0.15f) * reach * 0.9f,
+                        center.x + cos(angle) * reach, center.y + sin(angle) * reach)
+                    quadraticTo(center.x + cos(angle + 0.12f) * reach * 0.8f,
+                        center.y + sin(angle + 0.12f) * reach * 0.8f,
+                        center.x + cos(angle + spread) * base, center.y + sin(angle + spread) * base)
+                    close()
+                }
+                drawPath(flame, Brush.radialGradient(
+                    listOf(RiderCream, RiderGold, RiderFire.copy(alpha = 0.75f), Color.Transparent),
+                    center, reach * 1.08f), alpha = 0.85f * ease)
+            }
+            // Soft orange aura and a hot core keep the fire from looking like flat triangles.
+            drawCircle(Brush.radialGradient(listOf(RiderGold.copy(alpha = 0.22f),
+                RiderFire.copy(alpha = 0.18f), Color.Transparent), center, halo * 1.25f), halo * 1.25f, center)
+            drawCircle(RiderGold.copy(alpha = 0.65f * ease), halo * 0.63f, center,
+                style = Stroke(2.dp.toPx()))
+            // Low flames lick upward from the ground, with a fixed particle budget.
+            repeat(24) { index ->
+                val phase = (flameTime * 0.9f + index * 0.137f) % 1f
+                val x = size.width * (index + 0.5f) / 24f
+                val y = size.height - phase * size.height * 0.22f
+                val radius = (10f + 14f * (1f - phase)).dp.toPx()
+                drawCircle(Brush.radialGradient(listOf(RiderGold.copy(alpha = (1f - phase) * 0.6f),
+                    RiderFire.copy(alpha = (1f - phase) * 0.4f), Color.Transparent), Offset(x, y), radius), radius, Offset(x, y))
             }
             sparks.forEachIndexed { index, spark ->
                 val y = ((spark.y - time * spark.speed) % 1f + 1f) % 1f
                 val x = spark.x * size.width + sin(time * 0.7f + index) * 8.dp.toPx()
-                drawCircle(if (index % 4 == 0) RiderViolet.copy(alpha = 0.55f) else RiderGold.copy(alpha = 0.38f),
+                drawCircle(if (index % 4 == 0) RiderFire.copy(alpha = 0.8f) else RiderGold.copy(alpha = 0.65f),
                     spark.size.dp.toPx(), Offset(x, y * size.height))
             }
             // Tap shockwave and a fixed set of sparks: no growing particle lists.
@@ -142,42 +164,17 @@ fun HogRiderEasterEggOverlay(
                 size = Size(heroSize.toPx() * 0.9f, heroSize.toPx() * 0.22f))
         }
 
-        Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().padding(24.dp)) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text("SEKRET ODBLOKOWANY", color = RiderGold, fontSize = 10.sp,
-                    fontWeight = FontWeight.SemiBold, letterSpacing = 2.sp, modifier = Modifier.weight(1f))
-                IconButton(onClick = onDismiss, modifier = Modifier.size(48.dp).testTag("hog_rider_close")) {
-                    Icon(Icons.Default.Close, contentDescription = "Zamknij animację", tint = RiderCream)
-                }
-            }
-            Spacer(Modifier.weight(1f))
-            Column(Modifier.fillMaxWidth().padding(start = if (compact) sceneWidth * 0.44f else 0.dp).graphicsLayer { alpha = ease * exit }, horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("HOG RIDER", color = RiderCream, fontSize = minOf(40f, sceneWidth.value / 9f).sp,
-                    fontWeight = FontWeight.Black, letterSpacing = 3.sp)
-                Spacer(Modifier.height(8.dp))
-                Text("Mały sekret. Wielkie wejście.", color = Color(0xFFC3B8CE), fontSize = 13.sp)
-                Spacer(Modifier.height(20.dp))
-                Text("DOTKNIJ JEŹDŹCA", color = RiderGold, fontSize = 10.sp, letterSpacing = 2.sp)
-            }
-            Spacer(Modifier.height(28.dp))
-            Box(Modifier.fillMaxWidth().height(3.dp).clip(RoundedCornerShape(2.dp)).background(Color(0xFF2A2635))) {
-                Box(Modifier.fillMaxWidth((1f - elapsed / ShowDurationMillis).coerceIn(0f, 1f))
-                    .fillMaxHeight().background(Brush.horizontalGradient(listOf(RiderViolet, RiderGold))))
-            }
-        }
-
-        Image(painter = painterResource(R.drawable.hog_rider), contentDescription = "Hog Rider — dotknij, aby wywołać iskry",
+        Image(painter = painterResource(R.drawable.hog_rider), contentDescription = "Hog Rider — dotknij, aby wywołać ogień i lasery",
             contentScale = ContentScale.Fit,
-            modifier = Modifier.align(if (compact) Alignment.CenterStart else Alignment.Center)
-                .offset(x = if (compact) sceneWidth * 0.28f - heroSize / 2 else 0.dp, y = -(sceneHeight * 0.03f)).size(heroSize)
+            modifier = Modifier.align(Alignment.Center)
+                .offset(y = -(sceneHeight * 0.03f)).size(heroSize)
                 .graphicsLayer {
                     alpha = ease * exit
-                    val sizeScale = (0.72f + ease * 0.28f) * (1f + impact * 0.15f)
+                    val sizeScale = (0.35f + ease * 0.65f) * (1f + impact * 0.15f)
                     scaleX = sizeScale; scaleY = sizeScale
-                    translationY = (1f - ease) * 70.dp.toPx() + sin(time * 3.1f) * 5.dp.toPx()
-                    rotationZ = sin(time * 2.2f) * 2.2f + impact * 5f
+                    translationY = (1f - ease) * 70.dp.toPx() + sin(time * 7f) * 4.dp.toPx()
+                    rotationZ = sin(time * 3f) * 1.5f + impact * 5f
                 }
-                .clip(RoundedCornerShape(28.dp))
                 .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
                     if (elapsed - lastTapAt >= 180f) {
                         lastTapAt = elapsed
@@ -186,5 +183,37 @@ fun HogRiderEasterEggOverlay(
                         runCatching { tone?.startTone(ToneGenerator.TONE_PROP_BEEP, 70) }
                     }
                 }.testTag("hog_rider_portrait"))
+        Canvas(Modifier.fillMaxSize().graphicsLayer { alpha = ease * exit }) {
+            val hero = heroSize.toPx()
+            val center = Offset(size.width / 2f, size.height * 0.47f)
+            val scale = (0.35f + ease * 0.65f) * (1f + impact * 0.15f)
+            val rotation = (sin(time * 3f) * 1.5f + impact * 5f) * PI.toFloat() / 180f
+            val bob = (1f - ease) * 70.dp.toPx() + sin(time * 7f) * 4.dp.toPx()
+            // A smooth charge/fire cycle avoids full-screen flashes.
+            val cycle = if (reducedMotion) 0f else ((time - 0.8f).coerceAtLeast(0f) % 1.8f)
+            val charge = if (reducedMotion || time < 0.8f) 0f else
+                (cycle / 0.2f).coerceIn(0f, 1f) * ((1.1f - cycle) / 0.3f).coerceIn(0f, 1f)
+            val power = maxOf(charge, impact * 2f).coerceIn(0f, 1f)
+            if (power > 0f) {
+                repeat(2) { eye ->
+                    val local = Offset(hero * (0.094f + eye * 0.052f) * scale, -hero * 0.335f * scale)
+                    val origin = center + Offset(local.x * cos(rotation) - local.y * sin(rotation),
+                        local.x * sin(rotation) + local.y * cos(rotation) + bob)
+                    val target = Offset(size.width * (if (eye == 0) -0.1f else 1.1f),
+                        size.height * (0.24f + 0.12f * sin(time * 1.6f + eye)))
+                    drawLine(RiderFire.copy(alpha = power * 0.12f), origin, target, 26.dp.toPx(), StrokeCap.Round)
+                    drawLine(RiderFire.copy(alpha = power * 0.32f), origin, target, 12.dp.toPx(), StrokeCap.Round)
+                    drawLine(RiderGold.copy(alpha = power * 0.9f), origin, target, 4.dp.toPx(), StrokeCap.Round)
+                    drawLine(RiderCream.copy(alpha = power), origin, target, 1.5f.dp.toPx(), StrokeCap.Round)
+                    drawCircle(Brush.radialGradient(listOf(RiderCream.copy(alpha = power),
+                        RiderFire.copy(alpha = power * 0.65f), Color.Transparent), origin, 18.dp.toPx()), 18.dp.toPx(), origin)
+                }
+            }
+        }
+        IconButton(onClick = onDismiss,
+            modifier = Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(12.dp)
+                .size(48.dp).testTag("hog_rider_close")) {
+            Icon(Icons.Default.Close, contentDescription = "Zamknij animację", tint = RiderCream)
+        }
     }
 }
