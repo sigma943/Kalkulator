@@ -43,6 +43,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.SettingsManager
@@ -364,7 +365,7 @@ private fun ConverterDetailView(
     soundEnabled: Boolean
 ) {
     if (category.id == "bmi") {
-        BmiDetailView(onBack)
+        BmiDetailView(onBack, vibrateEnabled, soundEnabled)
         return
     }
     val palette = LocalCalculatorPalette.current
@@ -420,10 +421,7 @@ private fun ConverterDetailView(
             Toast.makeText(context, conversionError ?: "Brak wyniku", Toast.LENGTH_SHORT).show()
             return
         }
-        val text = "${result.display} ${outputUnit.symbol}"
-        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        clipboard.setPrimaryClip(ClipData.newPlainText("Wynik", text))
-        Toast.makeText(context, "Skopiowano: $text", Toast.LENGTH_SHORT).show()
+        copyConverterResult(context, "${result.display} ${outputUnit.symbol}")
     }
 
     fun setInput(value: String, position: Int = value.length) {
@@ -476,7 +474,7 @@ private fun ConverterDetailView(
         Column(
             modifier = modifier.verticalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            verticalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterVertically)
         ) {
             if (isCurrency) {
                 Row(
@@ -500,24 +498,27 @@ private fun ConverterDetailView(
                     }
                 }
             }
-            ConverterValueCard(
-                unit = fromUnit,
-                value = if (activeRow == 0) inputValue else convertedValue,
-                active = activeRow == 0,
-                cursor = cursor,
-                onCursorChange = { cursor = it },
-                onActivate = { activateRow(0) },
-                onPick = { pickerRow = 0 }
-            )
-            ConverterValueCard(
-                unit = toUnit,
-                value = if (activeRow == 1) inputValue else convertedValue,
-                active = activeRow == 1,
-                cursor = cursor,
-                onCursorChange = { cursor = it },
-                onActivate = { activateRow(1) },
-                onPick = { pickerRow = 1 }
-            )
+            ConverterPanel {
+                ConverterValueRow(
+                    unit = fromUnit,
+                    value = if (activeRow == 0) inputValue else convertedValue,
+                    active = activeRow == 0,
+                    cursor = cursor,
+                    onCursorChange = { cursor = it },
+                    onActivate = { activateRow(0) },
+                    onPick = { pickerRow = 0 }
+                )
+                HorizontalDivider(color = palette.cardBorder)
+                ConverterValueRow(
+                    unit = toUnit,
+                    value = if (activeRow == 1) inputValue else convertedValue,
+                    active = activeRow == 1,
+                    cursor = cursor,
+                    onCursorChange = { cursor = it },
+                    onActivate = { activateRow(1) },
+                    onPick = { pickerRow = 1 }
+                )
+            }
             if (conversionError != null && !(isCurrency && snapshot == null)) {
                 Text(
                     text = conversionError,
@@ -562,26 +563,7 @@ private fun ConverterDetailView(
         )
     }
 
-    Column(
-        modifier = Modifier.fillMaxSize().background(palette.background)
-            .statusBarsPadding().navigationBarsPadding()
-    ) {
-        ConverterHeader(category.name, onBack)
-        BoxWithConstraints(Modifier.fillMaxWidth().weight(1f)) {
-            if (maxWidth > maxHeight && maxWidth >= 540.dp) {
-                Row(Modifier.fillMaxSize()) {
-                    fields(Modifier.weight(1f).fillMaxHeight())
-                    keypad(Modifier.weight(1.2f).fillMaxHeight())
-                }
-            } else {
-                val keypadHeight = if (maxHeight < 440.dp) 0.55f else 0.60f
-                Column(Modifier.fillMaxSize()) {
-                    fields(Modifier.fillMaxWidth().weight(1f - keypadHeight))
-                    keypad(Modifier.fillMaxWidth().weight(keypadHeight))
-                }
-            }
-        }
-    }
+    ConverterLayout(category.name, onBack, fields, keypad)
 
     pickerRow?.let { row ->
         UnitPickerDialog(
@@ -598,7 +580,43 @@ private fun ConverterDetailView(
 }
 
 @Composable
-internal fun ConverterHeader(title: String, onBack: () -> Unit) {
+internal fun ConverterLayout(
+    title: String,
+    onBack: () -> Unit,
+    fields: @Composable (Modifier) -> Unit,
+    keypad: @Composable (Modifier) -> Unit
+) {
+    val palette = LocalCalculatorPalette.current
+    Column(
+        modifier = Modifier.fillMaxSize().background(palette.background)
+            .statusBarsPadding().navigationBarsPadding()
+    ) {
+        ConverterHeader(title, onBack)
+        BoxWithConstraints(Modifier.fillMaxWidth().weight(1f)) {
+            if (maxWidth > maxHeight && maxWidth >= 540.dp) {
+                Row(Modifier.fillMaxSize()) {
+                    fields(Modifier.weight(1f).fillMaxHeight())
+                    keypad(Modifier.weight(1.2f).fillMaxHeight())
+                }
+            } else {
+                val keypadHeight = if (maxHeight < 440.dp) 0.55f else 0.60f
+                Column(Modifier.fillMaxSize()) {
+                    fields(Modifier.fillMaxWidth().weight(1f - keypadHeight))
+                    keypad(Modifier.fillMaxWidth().weight(keypadHeight))
+                }
+            }
+        }
+    }
+}
+
+internal fun copyConverterResult(context: Context, text: String) {
+    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+    clipboard.setPrimaryClip(ClipData.newPlainText("Wynik", text))
+    Toast.makeText(context, "Skopiowano: $text", Toast.LENGTH_SHORT).show()
+}
+
+@Composable
+private fun ConverterHeader(title: String, onBack: () -> Unit) {
     val palette = LocalCalculatorPalette.current
     Row(
         modifier = Modifier.fillMaxWidth().padding(start = 8.dp, end = 16.dp, top = 4.dp, bottom = 4.dp),
@@ -618,7 +636,18 @@ internal fun ConverterHeader(title: String, onBack: () -> Unit) {
 }
 
 @Composable
-private fun ConverterValueCard(
+internal fun ConverterPanel(content: @Composable ColumnScope.() -> Unit) {
+    val palette = LocalCalculatorPalette.current
+    val shape = RoundedCornerShape(20.dp)
+    Column(
+        modifier = Modifier.fillMaxWidth().clip(shape).background(palette.cardBg)
+            .border(1.dp, palette.cardBorder, shape).padding(1.dp),
+        content = content
+    )
+}
+
+@Composable
+private fun ConverterValueRow(
     unit: ConversionUnit,
     value: String,
     active: Boolean,
@@ -628,20 +657,11 @@ private fun ConverterValueCard(
     onPick: () -> Unit
 ) {
     val palette = LocalCalculatorPalette.current
-    val shape = RoundedCornerShape(18.dp)
-    val fontSize = when {
-        value.length > 18 -> 20.sp
-        value.length > 12 -> 25.sp
-        else -> 31.sp
-    }
-    Column(
-        modifier = Modifier.fillMaxWidth().clip(shape).background(palette.cardBg)
-            .border(1.dp, if (active) palette.accentEquals.copy(alpha = 0.65f) else palette.cardBorder, shape)
-            .padding(horizontal = 12.dp, vertical = 4.dp)
-    ) {
+    val modifier = if (active) Modifier else Modifier.background(palette.accentEquals.copy(alpha = 0.08f))
+    Column(modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 5.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable(onClick = onPick)
-                .heightIn(min = 44.dp).padding(horizontal = 4.dp),
+                .heightIn(min = 42.dp).padding(horizontal = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
@@ -656,39 +676,72 @@ private fun ConverterValueCard(
             )
             Icon(Icons.Default.ExpandMore, "Zmień jednostkę", tint = palette.resultPreview)
         }
-        Box(
-            modifier = Modifier.fillMaxWidth().heightIn(min = 38.dp)
-                .padding(horizontal = 4.dp)
-                .then(if (active) Modifier else Modifier.clickable(onClick = onActivate)),
-            contentAlignment = Alignment.CenterEnd
-        ) {
-            if (active) {
+        if (active) {
+            Row(
+                modifier = Modifier.fillMaxWidth().heightIn(min = 43.dp).padding(horizontal = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text("Wartość", style = MaterialTheme.typography.labelMedium, color = palette.resultPreview)
                 KeypadInput(
                     value = value,
                     cursor = cursor,
                     onCursorChange = onCursorChange,
-                    color = palette.accentEquals,
+                    color = palette.numberText,
                     cursorColor = palette.cursor,
-                    fontSize = fontSize,
+                    fontSize = converterAmountSize(value),
                     fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f),
                     valueModifier = Modifier.testTag("converter_input")
                 )
-            } else {
-                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.End) {
-                    Text(
-                        text = value,
-                        color = palette.numberText,
-                        fontSize = fontSize,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        softWrap = false,
-                        modifier = Modifier.testTag("converter_result")
-                    )
-                }
             }
+        } else {
+            ConverterResultRow(
+                label = "Wynik",
+                value = value,
+                tag = "converter_result",
+                modifier = Modifier.clip(RoundedCornerShape(10.dp)).clickable(onClick = onActivate)
+                    .padding(horizontal = 4.dp)
+            )
         }
     }
+}
+
+@Composable
+internal fun ConverterResultRow(
+    label: String,
+    value: String,
+    tag: String,
+    modifier: Modifier = Modifier
+) {
+    val palette = LocalCalculatorPalette.current
+    Row(
+        modifier = Modifier.fillMaxWidth().then(modifier).heightIn(min = 43.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Text(label, style = MaterialTheme.typography.labelMedium, color = palette.numberText)
+        Row(
+            modifier = Modifier.weight(1f).horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.End
+        ) {
+            Text(
+                text = value,
+                color = if (value == "—") palette.resultPreview else palette.accentEquals,
+                fontSize = converterAmountSize(value),
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                softWrap = false,
+                modifier = Modifier.testTag(tag)
+            )
+        }
+    }
+}
+
+internal fun converterAmountSize(value: String): TextUnit = when {
+    value.length > 14 -> 21.sp
+    value.length > 10 -> 25.sp
+    else -> 34.sp
 }
 
 @Composable
@@ -711,9 +764,9 @@ private fun UnitSymbol(symbol: String) {
 }
 
 @Composable
-private fun ConverterKeypad(
+internal fun ConverterKeypad(
     modifier: Modifier,
-    hexInput: Boolean,
+    hexInput: Boolean = false,
     vibrateEnabled: Boolean,
     soundEnabled: Boolean,
     onDigit: (String) -> Unit,
@@ -724,7 +777,9 @@ private fun ConverterKeypad(
     onSwap: () -> Unit,
     onSign: () -> Unit,
     onCopy: () -> Unit,
-    onHundred: () -> Unit
+    onHundred: () -> Unit,
+    onEquals: () -> Unit = onCopy,
+    swapLabel: String = "Zamień jednostki"
 ) {
     val palette = LocalCalculatorPalette.current
     val rows = listOf(
@@ -775,7 +830,7 @@ private fun ConverterKeypad(
                     }
                     val label = when (key) {
                         "backspace" -> "Usuń znak"
-                        "swap" -> "Zamień jednostki"
+                        "swap" -> swapLabel
                         "copy" -> "Kopiuj wynik"
                         else -> key
                     }
@@ -785,7 +840,8 @@ private fun ConverterKeypad(
                         "%" -> onPercent
                         "swap" -> onSwap
                         "±" -> onSign
-                        "copy", "=" -> onCopy
+                        "copy" -> onCopy
+                        "=" -> onEquals
                         "100" -> onHundred
                         "," -> onDot
                         else -> { { onDigit(key) } }
