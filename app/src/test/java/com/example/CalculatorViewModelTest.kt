@@ -46,6 +46,42 @@ class CalculatorViewModelTest {
 
     private fun input(text: String) { text.forEach { vm.onDigit(it.toString()) } }
 
+    @Test fun keypadInsertsAndDeletesAtCursor() {
+        input("1234")
+        vm.moveCursor(2)
+        input("9")
+        assertEquals("12934", vm.expression.value)
+        assertEquals(3, vm.cursor.value)
+
+        vm.onBackspace()
+        vm.onOperator("+")
+        assertEquals("12+34", vm.expression.value)
+        assertEquals(3, vm.cursor.value)
+        vm.onEquals()
+        assertEquals("46", vm.expression.value)
+    }
+
+    @Test fun decimalKeyChecksBothSidesOfCursor() {
+        input("12,3")
+        vm.moveCursor(1)
+        vm.onDigit(",")
+        assertEquals("12,3", vm.expression.value)
+
+        vm.onClear()
+        input("123")
+        vm.moveCursor(2)
+        vm.onDigit(",")
+        assertEquals("12,3", vm.expression.value)
+    }
+
+    @Test fun movingCursorIntoResultAllowsEditingIt() {
+        input("123")
+        vm.onEquals()
+        vm.moveCursor(1)
+        input("4")
+        assertEquals("1423", vm.expression.value)
+    }
+
     @Test fun roundedResultKeepsPrecisionForContinuation() {
         settings.updateDecimalPlaces(2)
         input("1"); vm.onOperator("÷"); input("3"); vm.onEquals()

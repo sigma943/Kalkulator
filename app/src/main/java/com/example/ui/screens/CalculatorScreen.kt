@@ -34,6 +34,7 @@ fun CalculatorScreen(
     val coroutineScope = rememberCoroutineScope()
 
     val expression by viewModel.expression.collectAsState()
+    val cursor by viewModel.cursor.collectAsState()
     val resultPreview by viewModel.resultPreview.collectAsState()
     val lastEvaluation by viewModel.lastEvaluation.collectAsState()
     val errorMessage by viewModel.errorMessage.collectAsState()
@@ -143,6 +144,8 @@ fun CalculatorScreen(
                         .fillMaxWidth()
                         .weight(currentDisplayWeight),
                     expression = expression,
+                    cursor = cursor,
+                    onCursorChange = viewModel::moveCursor,
                     resultPreview = resultPreview,
                     lastEvaluation = lastEvaluation,
                     errorMessage = errorMessage,
@@ -255,6 +258,8 @@ fun CalculatorScreen(
                     CalculatorDisplay(
                         modifier = Modifier.fillMaxSize(),
                         expression = expression,
+                        cursor = cursor,
+                        onCursorChange = viewModel::moveCursor,
                         resultPreview = resultPreview,
                         lastEvaluation = lastEvaluation,
                         errorMessage = errorMessage,

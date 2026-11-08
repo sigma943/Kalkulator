@@ -12,12 +12,17 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -34,6 +39,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -42,6 +48,7 @@ import androidx.compose.ui.unit.sp
 import com.example.data.SettingsManager
 import com.example.ui.Screen
 import com.example.ui.components.CalculatorButton
+import com.example.ui.components.KeypadInput
 import com.example.ui.screens.FeedbackDialog
 import com.example.ui.screens.HelpDialog
 import com.example.ui.screens.PrivacyPolicyDialog
@@ -367,20 +374,23 @@ private fun ConverterDetailView(
     var toUnitIndex by remember(category.id) { mutableIntStateOf(1.coerceAtMost(category.units.size - 1)) }
     var activeRow by remember(category.id) { mutableIntStateOf(0) } // 0 = row1 (from), 1 = row2 (to)
     var inputValue by remember(category.id) { mutableStateOf("1") }
+    var cursor by remember(category.id) { mutableIntStateOf(1) }
 
-    var showFromDialog by remember { mutableStateOf(false) }
-    var showToDialog by remember { mutableStateOf(false) }
+    var pickerRow by remember { mutableStateOf<Int?>(null) }
 
     val fromUnit = category.units.getOrElse(fromUnitIndex) { category.units.first() }
     val toUnit = category.units.getOrElse(toUnitIndex) { category.units.last() }
 
-    val currencyRepository = remember(context) { CurrencyRateRepository(context) }
-    var snapshot by remember { mutableStateOf(currencyRepository.cached()) }
+    val isCurrency = category.id == "currency"
+    val currencyRepository = remember(context, isCurrency) {
+        if (isCurrency) CurrencyRateRepository(context) else null
+    }
+    var snapshot by remember(currencyRepository) { mutableStateOf(currencyRepository?.cached()) }
     var refreshRequest by remember { mutableIntStateOf(0) }
     var refreshing by remember { mutableStateOf(false) }
     var rateMessage by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(category.id, refreshRequest) {
-        if (category.id == "currency") {
+        if (currencyRepository != null) {
             refreshing = true
             rateMessage = null
             try {
@@ -389,8 +399,8 @@ private fun ConverterDetailView(
                 throw e
             } catch (e: Exception) {
                 snapshot = currencyRepository.cached()
-                rateMessage = if (snapshot == null) "Brak kursów NBP. Sprawdź połączenie i odśwież."
-                    else "Brak połączenia — używam zapisanej tabeli."
+                rateMessage = if (snapshot == null) "Brak kursów NBP"
+                    else "Kursy zapisane offline"
             } finally {
                 refreshing = false
             }
@@ -416,438 +426,401 @@ private fun ConverterDetailView(
         Toast.makeText(context, "Skopiowano: $text", Toast.LENGTH_SHORT).show()
     }
 
+    fun setInput(value: String, position: Int = value.length) {
+        inputValue = value
+        cursor = position
+    }
+
     fun activateRow(row: Int) {
         if (row == activeRow) return
         val result = conversion as? UnitConverterEngine.Result.Success ?: return
-        // Transfer the unrounded result instead of reinterpreting the original input.
-        inputValue = if (category.id == "numeral") result.raw else
+        val transferred = if (category.id == "numeral") result.raw else
             result.raw.toBigDecimal().toPlainString().let { plain ->
                 (if (plain.length <= 256) plain else result.raw).replace('.', ',')
             }
+        setInput(transferred)
         activeRow = row
     }
 
-    // Input handlers
-    fun handleDigit(d: String) {
+    fun insert(text: String) {
+        if (inputValue.length + text.length <= 128) {
+            setInput(inputValue.take(cursor) + text + inputValue.drop(cursor), cursor + text.length)
+        }
+    }
+
+    fun handleDigit(digit: String) {
         if (category.id == "numeral") {
             val radix = UnitConverterEngine.numeralRadix(inputUnit.id)
-            if (!d.all { Character.digit(it, radix) in 0 until radix }) return
+            if (!digit.all { Character.digit(it, radix) in 0 until radix }) return
         }
-        if (inputValue == "0") inputValue = d
-        else if (inputValue.length + d.length <= 128) inputValue += d
+        if (inputValue == "0") {
+            if (digit != "00") setInput(digit)
+        } else {
+            insert(digit)
+        }
     }
 
     fun handleDot() {
-        if (category.id == "numeral" || inputValue.contains('E', ignoreCase = true)) return
-        if (!inputValue.contains(".") && !inputValue.contains(",")) {
-            inputValue = if (inputValue.isEmpty()) "0," else "$inputValue,"
-        }
+        if (category.id == "numeral" || inputValue.any { it in ".,Ee" }) return
+        if (cursor == 0 && inputValue.startsWith('-')) return
+        insert(if (inputValue.isEmpty() || inputValue == "-") "0," else ",")
     }
 
     fun handleBackspace() {
-        if (inputValue.isNotEmpty()) {
-            inputValue = inputValue.dropLast(1)
-            if (inputValue.isEmpty()) inputValue = "0"
-        }
+        if (cursor == 0) return
+        val updated = inputValue.removeRange(cursor - 1, cursor)
+        if (updated.isEmpty()) setInput("0") else setInput(updated, cursor - 1)
     }
 
-    fun handleClear() {
-        inputValue = "0"
+    val fields: @Composable (Modifier) -> Unit = { modifier ->
+        Column(
+            modifier = modifier.verticalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            if (isCurrency) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(start = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    val source = snapshot?.let { "NBP · ${it.date}" } ?: "NBP"
+                    Text(
+                        text = when {
+                            refreshing -> "$source · Pobieranie kursów"
+                            rateMessage != null -> if (snapshot == null) rateMessage.orEmpty() else "$source · Offline"
+                            else -> source
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = palette.resultPreview,
+                        modifier = Modifier.weight(1f)
+                    )
+                    TextButton(onClick = { refreshRequest++ }, enabled = !refreshing) {
+                        Text("Odśwież")
+                    }
+                }
+            }
+            ConverterValueCard(
+                unit = fromUnit,
+                value = if (activeRow == 0) inputValue else convertedValue,
+                active = activeRow == 0,
+                cursor = cursor,
+                onCursorChange = { cursor = it },
+                onActivate = { activateRow(0) },
+                onPick = { pickerRow = 0 }
+            )
+            ConverterValueCard(
+                unit = toUnit,
+                value = if (activeRow == 1) inputValue else convertedValue,
+                active = activeRow == 1,
+                cursor = cursor,
+                onCursorChange = { cursor = it },
+                onActivate = { activateRow(1) },
+                onPick = { pickerRow = 1 }
+            )
+            if (conversionError != null && !(isCurrency && snapshot == null)) {
+                Text(
+                    text = conversionError,
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.testTag("converter_error")
+                )
+            }
+        }
+    }
+    val keypad: @Composable (Modifier) -> Unit = { modifier ->
+        ConverterKeypad(
+            modifier = modifier,
+            hexInput = category.id == "numeral" && inputUnit.id == "hex",
+            vibrateEnabled = vibrateEnabled,
+            soundEnabled = soundEnabled,
+            onDigit = ::handleDigit,
+            onDot = ::handleDot,
+            onClear = { setInput("0") },
+            onBackspace = ::handleBackspace,
+            onPercent = {
+                if (category.id != "numeral") {
+                    runCatching { UnitConverterEngine.percentInput(inputValue) }
+                        .onSuccess { setInput(it.replace('.', ',')) }
+                        .onFailure { Toast.makeText(context, "Niepoprawna liczba", Toast.LENGTH_SHORT).show() }
+                }
+            },
+            onSwap = {
+                val previousFrom = fromUnitIndex
+                fromUnitIndex = toUnitIndex
+                toUnitIndex = previousFrom
+            },
+            onSign = {
+                if (inputValue.startsWith("-")) {
+                    setInput(inputValue.drop(1).ifEmpty { "0" }, (cursor - 1).coerceAtLeast(0))
+                } else if (inputValue != "0") {
+                    setInput("-$inputValue", cursor + 1)
+                }
+            },
+            onCopy = ::copyResult,
+            onHundred = { setInput("100") }
+        )
     }
 
     Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(palette.background)
-            .statusBarsPadding()
-            .navigationBarsPadding()
+        modifier = Modifier.fillMaxSize().background(palette.background)
+            .statusBarsPadding().navigationBarsPadding()
     ) {
-        // Pasek górny: Powrót + Tytuł kategorii
+        ConverterHeader(category.name, onBack)
+        BoxWithConstraints(Modifier.fillMaxWidth().weight(1f)) {
+            if (maxWidth > maxHeight && maxWidth >= 540.dp) {
+                Row(Modifier.fillMaxSize()) {
+                    fields(Modifier.weight(1f).fillMaxHeight())
+                    keypad(Modifier.weight(1.2f).fillMaxHeight())
+                }
+            } else {
+                val keypadHeight = if (maxHeight < 440.dp) 0.55f else 0.60f
+                Column(Modifier.fillMaxSize()) {
+                    fields(Modifier.fillMaxWidth().weight(1f - keypadHeight))
+                    keypad(Modifier.fillMaxWidth().weight(keypadHeight))
+                }
+            }
+        }
+    }
+
+    pickerRow?.let { row ->
+        UnitPickerDialog(
+            title = if (isCurrency) "Wybierz walutę" else "Wybierz jednostkę",
+            units = category.units,
+            selectedIndex = if (row == 0) fromUnitIndex else toUnitIndex,
+            onSelect = {
+                if (row == 0) fromUnitIndex = it else toUnitIndex = it
+                pickerRow = null
+            },
+            onDismiss = { pickerRow = null }
+        )
+    }
+}
+
+@Composable
+internal fun ConverterHeader(title: String, onBack: () -> Unit) {
+    val palette = LocalCalculatorPalette.current
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(start = 8.dp, end = 16.dp, top = 4.dp, bottom = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        IconButton(onClick = onBack) {
+            Icon(Icons.AutoMirrored.Filled.ArrowBack, "Powrót", tint = palette.numberText)
+        }
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.SemiBold,
+            color = palette.numberText,
+            modifier = Modifier.padding(start = 8.dp)
+        )
+    }
+}
+
+@Composable
+private fun ConverterValueCard(
+    unit: ConversionUnit,
+    value: String,
+    active: Boolean,
+    cursor: Int,
+    onCursorChange: (Int) -> Unit,
+    onActivate: () -> Unit,
+    onPick: () -> Unit
+) {
+    val palette = LocalCalculatorPalette.current
+    val shape = RoundedCornerShape(18.dp)
+    val fontSize = when {
+        value.length > 18 -> 20.sp
+        value.length > 12 -> 25.sp
+        else -> 31.sp
+    }
+    Column(
+        modifier = Modifier.fillMaxWidth().clip(shape).background(palette.cardBg)
+            .border(1.dp, if (active) palette.accentEquals.copy(alpha = 0.65f) else palette.cardBorder, shape)
+            .padding(horizontal = 12.dp, vertical = 4.dp)
+    ) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically
+            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable(onClick = onPick)
+                .heightIn(min = 44.dp).padding(horizontal = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            IconButton(onClick = onBack) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = "Powrót",
-                    tint = palette.numberText
-                )
-            }
+            UnitSymbol(unit.symbol)
             Text(
-                text = category.name,
-                fontSize = 20.sp,
-                fontWeight = FontWeight.SemiBold,
+                text = unit.name,
                 color = palette.numberText,
-                modifier = Modifier.padding(start = 8.dp)
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f)
             )
+            Icon(Icons.Default.ExpandMore, "Zmień jednostkę", tint = palette.resultPreview)
         }
-
-        val note = when (category.id) {
-            "currency" -> snapshot?.let { "NBP, kurs średni z ${it.date}. Bez spreadu i prowizji." } ?: "Kursy średnie NBP"
-            "data" -> "kB/MB/GB: wielokrotności 1000; KiB/MiB/GiB: wielokrotności 1024."
-            "date", "time" -> "Miesiąc = średnio 30,4375 dnia; rok = 365,25 dnia. To okresy, nie daty kalendarzowe."
-            "finance" -> "Wybierz kwotę bazową/netto lub kwotę z wybranym VAT/napiwkiem."
-            "discount" -> "Wybierz cenę przed rabatem lub cenę po określonym rabacie."
-            "speed" -> "Mach: stałe przybliżenie 340,29 m/s dla powietrza przy 15°C."
-            "angle" -> "Radiany wykorzystują przybliżenie π."
-            "numeral" -> "Liczby całkowite. HEX obsługuje cyfry A–F."
-            else -> null
-        }
-        if (note != null) Text(note, color = palette.numberText, fontSize = 12.sp,
-            modifier = Modifier.padding(horizontal = 20.dp, vertical = 2.dp))
-        if (category.id == "currency") {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(rateMessage ?: if (refreshing) "Pobieranie kursów…" else "Tabela NBP; kursy mogą pochodzić z poprzedniego dnia roboczego.",
-                    modifier = Modifier.weight(1f), fontSize = 11.sp, color = palette.numberText)
-                TextButton(onClick = { refreshRequest++ }, enabled = !refreshing) { Text("Odśwież") }
+        Box(
+            modifier = Modifier.fillMaxWidth().heightIn(min = 38.dp)
+                .padding(horizontal = 4.dp)
+                .then(if (active) Modifier else Modifier.clickable(onClick = onActivate)),
+            contentAlignment = Alignment.CenterEnd
+        ) {
+            if (active) {
+                KeypadInput(
+                    value = value,
+                    cursor = cursor,
+                    onCursorChange = onCursorChange,
+                    color = palette.accentEquals,
+                    cursorColor = palette.cursor,
+                    fontSize = fontSize,
+                    fontWeight = FontWeight.SemiBold,
+                    valueModifier = Modifier.testTag("converter_input")
+                )
+            } else {
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.End) {
+                    Text(
+                        text = value,
+                        color = palette.numberText,
+                        fontSize = fontSize,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        softWrap = false,
+                        modifier = Modifier.testTag("converter_result")
+                    )
+                }
             }
         }
-        if (conversionError != null) Text(conversionError, color = MaterialTheme.colorScheme.error,
-            fontSize = 12.sp, modifier = Modifier.padding(horizontal = 20.dp, vertical = 2.dp).testTag("converter_error"))
-        if (category.id == "numeral" && inputUnit.id == "hex") {
+    }
+}
+
+@Composable
+private fun UnitSymbol(symbol: String) {
+    val palette = LocalCalculatorPalette.current
+    Box(
+        modifier = Modifier.widthIn(min = 42.dp, max = 88.dp)
+            .clip(RoundedCornerShape(8.dp)).background(palette.operatorBtn)
+            .padding(horizontal = 6.dp, vertical = 4.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = symbol,
+            color = palette.operatorText,
+            style = MaterialTheme.typography.labelMedium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
+@Composable
+private fun ConverterKeypad(
+    modifier: Modifier,
+    hexInput: Boolean,
+    vibrateEnabled: Boolean,
+    soundEnabled: Boolean,
+    onDigit: (String) -> Unit,
+    onDot: () -> Unit,
+    onClear: () -> Unit,
+    onBackspace: () -> Unit,
+    onPercent: () -> Unit,
+    onSwap: () -> Unit,
+    onSign: () -> Unit,
+    onCopy: () -> Unit,
+    onHundred: () -> Unit
+) {
+    val palette = LocalCalculatorPalette.current
+    val rows = listOf(
+        listOf("C", "backspace", "%", "swap"),
+        listOf("7", "8", "9", "±"),
+        listOf("4", "5", "6", "copy"),
+        listOf("1", "2", "3", "100"),
+        listOf("00", "0", ",", "=")
+    )
+    Column(
+        modifier = modifier.padding(start = 14.dp, end = 14.dp, bottom = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        if (hexInput) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                "ABCDEF".forEach { digit -> TextButton(onClick = { handleDigit(digit.toString()) }) { Text(digit.toString()) } }
+                "ABCDEF".forEach { digit ->
+                    TextButton(
+                        onClick = { onDigit(digit.toString()) },
+                        modifier = Modifier.weight(1f),
+                        contentPadding = PaddingValues(0.dp)
+                    ) { Text(digit.toString()) }
+                }
             }
         }
-
-        // Górny panel wartości i jednostek (dokładnie jak na zrzucie ekranu 2)
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(0.38f)
-                .padding(horizontal = 20.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.SpaceEvenly
-        ) {
-            // RZĄD 1 (Jednostka 1)
+        rows.forEachIndexed { rowIndex, row ->
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp))
-                    .clickable { activateRow(0) }
-                    .padding(vertical = 10.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                modifier = Modifier.fillMaxWidth().weight(1f),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                // Wybór jednostki z ikoną przełączania ⇳
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .clickable { showFromDialog = true }
-                        .padding(horizontal = 6.dp, vertical = 4.dp)
-                ) {
-                    Text(
-                        text = "${fromUnit.name} ${fromUnit.symbol}",
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = palette.numberText
-                    )
-                    Icon(
-                        imageVector = Icons.Default.UnfoldMore,
-                        contentDescription = "Zmień jednostkę",
-                        tint = palette.numberText.copy(alpha = 0.6f),
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-
-                // Wartość jednostki 1 (podświetlona gdy aktywna) - scrollable, non-wrapping
-                Row(
-                    modifier = Modifier
-                        .weight(1f)
-                        .padding(start = 12.dp)
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.End,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = if (activeRow == 0) (inputValue.ifEmpty { "0" }) else convertedValue,
-                        fontSize = 28.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (activeRow == 0) palette.accentEquals else palette.numberText,
-                        textAlign = TextAlign.End,
-                        maxLines = 1
-                    )
-                }
-            }
-
-            // RZĄD 2 (Jednostka 2)
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp))
-                    .clickable { activateRow(1) }
-                    .padding(vertical = 10.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                // Wybór jednostki 2 z ikoną przełączania ⇳
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .clickable { showToDialog = true }
-                        .padding(horizontal = 6.dp, vertical = 4.dp)
-                ) {
-                    Text(
-                        text = "${toUnit.name} ${toUnit.symbol}",
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = palette.numberText
-                    )
-                    Icon(
-                        imageVector = Icons.Default.UnfoldMore,
-                        contentDescription = "Zmień jednostkę",
-                        tint = palette.numberText.copy(alpha = 0.6f),
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-
-                // Wartość jednostki 2 (podświetlona gdy aktywna) - scrollable, non-wrapping
-                Row(
-                    modifier = Modifier
-                        .weight(1f)
-                        .padding(start = 12.dp)
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.End,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = if (activeRow == 1) (inputValue.ifEmpty { "0" }) else convertedValue,
-                        fontSize = 28.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (activeRow == 1) palette.accentEquals else palette.numberText,
-                        textAlign = TextAlign.End,
-                        maxLines = 1
+                row.forEachIndexed { index, key ->
+                    val numeric = rowIndex > 0 && index < 3
+                    val color = when {
+                        numeric -> palette.numberText
+                        key == "=" -> palette.equalsText
+                        key == "C" || key == "backspace" || key == "swap" -> palette.accentEquals
+                        else -> palette.operatorText
+                    }
+                    val background = when {
+                        numeric -> palette.numberBtn
+                        key == "=" -> palette.accentEquals
+                        else -> palette.operatorBtn
+                    }
+                    val image = when (key) {
+                        "backspace" -> Icons.AutoMirrored.Outlined.Backspace
+                        "swap" -> Icons.Default.SwapVert
+                        "copy" -> Icons.Outlined.ContentCopy
+                        else -> null
+                    }
+                    val label = when (key) {
+                        "backspace" -> "Usuń znak"
+                        "swap" -> "Zamień jednostki"
+                        "copy" -> "Kopiuj wynik"
+                        else -> key
+                    }
+                    val action = when (key) {
+                        "C" -> onClear
+                        "backspace" -> onBackspace
+                        "%" -> onPercent
+                        "swap" -> onSwap
+                        "±" -> onSign
+                        "copy", "=" -> onCopy
+                        "100" -> onHundred
+                        "," -> onDot
+                        else -> { { onDigit(key) } }
+                    }
+                    val tag = when (key) {
+                        "C" -> "clear"
+                        "%" -> "percent"
+                        "±" -> "sign"
+                        "," -> "comma"
+                        "=" -> "equals"
+                        else -> key
+                    }
+                    val keyIcon: (@Composable () -> Unit)? = if (image == null) null else {
+                        { Icon(image, label, tint = color, modifier = Modifier.size(22.dp)) }
+                    }
+                    CalculatorButton(
+                        modifier = Modifier.weight(1f).fillMaxHeight(),
+                        text = key,
+                        icon = keyIcon,
+                        backgroundColor = background,
+                        contentColor = color,
+                        fontSize = when {
+                            key == "100" -> 18.sp
+                            numeric || key == "=" -> 26.sp
+                            else -> 22.sp
+                        },
+                        shape = CircleShape,
+                        testTag = "conv_btn_$tag",
+                        vibrateEnabled = vibrateEnabled,
+                        soundEnabled = soundEnabled,
+                        onClick = action
                     )
                 }
             }
         }
-
-        // Dolny panel z wbudowaną klawiaturą numeryczną (Screenshot 2)
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(0.62f)
-                .padding(start = 14.dp, end = 14.dp, bottom = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            // Rząd 1: C, ⌫, %, ⇅
-            Row(
-                modifier = Modifier.fillMaxWidth().weight(1f),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                CalculatorButton(
-                    modifier = Modifier.weight(1f).fillMaxHeight(),
-                    text = "C",
-                    backgroundColor = palette.operatorBtn,
-                    contentColor = palette.accentEquals,
-                    fontSize = 24.sp,
-                    fontWeight = FontWeight.Bold,
-                    shape = CircleShape,
-                    testTag = "conv_btn_clear",
-                    vibrateEnabled = vibrateEnabled,
-                    soundEnabled = soundEnabled,
-                    onClick = { handleClear() }
-                )
-                CalculatorButton(
-                    modifier = Modifier.weight(1f).fillMaxHeight(),
-                    icon = {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Outlined.Backspace,
-                            contentDescription = "Backspace",
-                            tint = palette.accentEquals,
-                            modifier = Modifier.size(22.dp)
-                        )
-                    },
-                    backgroundColor = palette.operatorBtn,
-                    contentColor = palette.accentEquals,
-                    shape = CircleShape,
-                    testTag = "conv_btn_backspace",
-                    vibrateEnabled = vibrateEnabled,
-                    soundEnabled = soundEnabled,
-                    onClick = { handleBackspace() }
-                )
-                CalculatorButton(
-                    modifier = Modifier.weight(1f).fillMaxHeight(),
-                    text = "%",
-                    backgroundColor = palette.operatorBtn,
-                    contentColor = palette.operatorText,
-                    fontSize = 22.sp,
-                    fontWeight = FontWeight.Medium,
-                    shape = CircleShape,
-                    testTag = "conv_btn_percent",
-                    vibrateEnabled = vibrateEnabled,
-                    soundEnabled = soundEnabled,
-                    onClick = {
-                        if (category.id != "numeral") {
-                            runCatching { UnitConverterEngine.percentInput(inputValue) }
-                                .onSuccess { inputValue = it.replace('.', ',') }
-                                .onFailure { Toast.makeText(context, "Niepoprawna liczba", Toast.LENGTH_SHORT).show() }
-                        }
-                    }
-                )
-                CalculatorButton(
-                    modifier = Modifier.weight(1f).fillMaxHeight(),
-                    icon = {
-                        Icon(
-                            imageVector = Icons.Default.SwapVert,
-                            contentDescription = "Zamień jednostki",
-                            tint = palette.accentEquals,
-                            modifier = Modifier.size(24.dp)
-                        )
-                    },
-                    backgroundColor = palette.operatorBtn,
-                    contentColor = palette.accentEquals,
-                    shape = CircleShape,
-                    testTag = "conv_btn_swap",
-                    vibrateEnabled = vibrateEnabled,
-                    soundEnabled = soundEnabled,
-                    onClick = {
-                        val temp = fromUnitIndex
-                        fromUnitIndex = toUnitIndex
-                        toUnitIndex = temp
-                    }
-                )
-            }
-
-            // Rząd 2: 7, 8, 9, ±
-            Row(
-                modifier = Modifier.fillMaxWidth().weight(1f),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                CalculatorButton(modifier = Modifier.weight(1f).fillMaxHeight(), text = "7", backgroundColor = palette.numberBtn, contentColor = palette.numberText, fontSize = 28.sp, shape = CircleShape, testTag = "conv_btn_7", vibrateEnabled = vibrateEnabled, soundEnabled = soundEnabled, onClick = { handleDigit("7") })
-                CalculatorButton(modifier = Modifier.weight(1f).fillMaxHeight(), text = "8", backgroundColor = palette.numberBtn, contentColor = palette.numberText, fontSize = 28.sp, shape = CircleShape, testTag = "conv_btn_8", vibrateEnabled = vibrateEnabled, soundEnabled = soundEnabled, onClick = { handleDigit("8") })
-                CalculatorButton(modifier = Modifier.weight(1f).fillMaxHeight(), text = "9", backgroundColor = palette.numberBtn, contentColor = palette.numberText, fontSize = 28.sp, shape = CircleShape, testTag = "conv_btn_9", vibrateEnabled = vibrateEnabled, soundEnabled = soundEnabled, onClick = { handleDigit("9") })
-                CalculatorButton(
-                    modifier = Modifier.weight(1f).fillMaxHeight(),
-                    text = "±",
-                    backgroundColor = palette.operatorBtn,
-                    contentColor = palette.operatorText,
-                    fontSize = 24.sp,
-                    shape = CircleShape,
-                    testTag = "conv_btn_sign",
-                    vibrateEnabled = vibrateEnabled,
-                    soundEnabled = soundEnabled,
-                    onClick = {
-                        if (inputValue.startsWith("-")) {
-                            inputValue = inputValue.drop(1)
-                        } else if (inputValue != "0") {
-                            inputValue = "-$inputValue"
-                        }
-                    }
-                )
-            }
-
-            // Rząd 3: 4, 5, 6, Kopiuj
-            Row(
-                modifier = Modifier.fillMaxWidth().weight(1f),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                CalculatorButton(modifier = Modifier.weight(1f).fillMaxHeight(), text = "4", backgroundColor = palette.numberBtn, contentColor = palette.numberText, fontSize = 28.sp, shape = CircleShape, testTag = "conv_btn_4", vibrateEnabled = vibrateEnabled, soundEnabled = soundEnabled, onClick = { handleDigit("4") })
-                CalculatorButton(modifier = Modifier.weight(1f).fillMaxHeight(), text = "5", backgroundColor = palette.numberBtn, contentColor = palette.numberText, fontSize = 28.sp, shape = CircleShape, testTag = "conv_btn_5", vibrateEnabled = vibrateEnabled, soundEnabled = soundEnabled, onClick = { handleDigit("5") })
-                CalculatorButton(modifier = Modifier.weight(1f).fillMaxHeight(), text = "6", backgroundColor = palette.numberBtn, contentColor = palette.numberText, fontSize = 28.sp, shape = CircleShape, testTag = "conv_btn_6", vibrateEnabled = vibrateEnabled, soundEnabled = soundEnabled, onClick = { handleDigit("6") })
-                CalculatorButton(
-                    modifier = Modifier.weight(1f).fillMaxHeight(),
-                    icon = {
-                        Icon(
-                            imageVector = Icons.Outlined.ContentCopy,
-                            contentDescription = "Kopiuj",
-                            tint = palette.operatorText,
-                            modifier = Modifier.size(20.dp)
-                        )
-                    },
-                    backgroundColor = palette.operatorBtn,
-                    contentColor = palette.operatorText,
-                    shape = CircleShape,
-                    testTag = "conv_btn_copy",
-                    vibrateEnabled = vibrateEnabled,
-                    soundEnabled = soundEnabled,
-                    onClick = {
-                        copyResult()
-                    }
-                )
-            }
-
-            // Rząd 4: 1, 2, 3, 100
-            Row(
-                modifier = Modifier.fillMaxWidth().weight(1f),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                CalculatorButton(modifier = Modifier.weight(1f).fillMaxHeight(), text = "1", backgroundColor = palette.numberBtn, contentColor = palette.numberText, fontSize = 28.sp, shape = CircleShape, testTag = "conv_btn_1", vibrateEnabled = vibrateEnabled, soundEnabled = soundEnabled, onClick = { handleDigit("1") })
-                CalculatorButton(modifier = Modifier.weight(1f).fillMaxHeight(), text = "2", backgroundColor = palette.numberBtn, contentColor = palette.numberText, fontSize = 28.sp, shape = CircleShape, testTag = "conv_btn_2", vibrateEnabled = vibrateEnabled, soundEnabled = soundEnabled, onClick = { handleDigit("2") })
-                CalculatorButton(modifier = Modifier.weight(1f).fillMaxHeight(), text = "3", backgroundColor = palette.numberBtn, contentColor = palette.numberText, fontSize = 28.sp, shape = CircleShape, testTag = "conv_btn_3", vibrateEnabled = vibrateEnabled, soundEnabled = soundEnabled, onClick = { handleDigit("3") })
-                CalculatorButton(
-                    modifier = Modifier.weight(1f).fillMaxHeight(),
-                    text = "100",
-                    backgroundColor = palette.operatorBtn,
-                    contentColor = palette.operatorText,
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Medium,
-                    shape = CircleShape,
-                    testTag = "conv_btn_100",
-                    vibrateEnabled = vibrateEnabled,
-                    soundEnabled = soundEnabled,
-                    onClick = { inputValue = "100" }
-                )
-            }
-
-            // Rząd 5: 00, 0, ,, =
-            Row(
-                modifier = Modifier.fillMaxWidth().weight(1f),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                CalculatorButton(modifier = Modifier.weight(1f).fillMaxHeight(), text = "00", backgroundColor = palette.numberBtn, contentColor = palette.numberText, fontSize = 24.sp, shape = CircleShape, testTag = "conv_btn_00", vibrateEnabled = vibrateEnabled, soundEnabled = soundEnabled, onClick = { if (inputValue != "0") handleDigit("00") })
-                CalculatorButton(modifier = Modifier.weight(1f).fillMaxHeight(), text = "0", backgroundColor = palette.numberBtn, contentColor = palette.numberText, fontSize = 28.sp, shape = CircleShape, testTag = "conv_btn_0", vibrateEnabled = vibrateEnabled, soundEnabled = soundEnabled, onClick = { handleDigit("0") })
-                CalculatorButton(modifier = Modifier.weight(1f).fillMaxHeight(), text = ",", backgroundColor = palette.numberBtn, contentColor = palette.numberText, fontSize = 28.sp, fontWeight = FontWeight.Bold, shape = CircleShape, testTag = "conv_btn_comma", vibrateEnabled = vibrateEnabled, soundEnabled = soundEnabled, onClick = { handleDot() })
-                CalculatorButton(
-                    modifier = Modifier.weight(1f).fillMaxHeight(),
-                    text = "=",
-                    backgroundColor = palette.accentEquals,
-                    contentColor = palette.equalsText,
-                    fontSize = 30.sp,
-                    shape = CircleShape,
-                    testTag = "conv_btn_equals",
-                    vibrateEnabled = vibrateEnabled,
-                    soundEnabled = soundEnabled,
-                    onClick = {
-                        copyResult()
-                    }
-                )
-            }
-        }
-    }
-
-    // DIALOG WYBORU JEDNOSTKI 1
-    if (showFromDialog) {
-        UnitPickerDialog(
-            title = "Wybierz jednostkę",
-            units = category.units,
-            selectedIndex = fromUnitIndex,
-            onSelect = {
-                fromUnitIndex = it
-                showFromDialog = false
-            },
-            onDismiss = { showFromDialog = false }
-        )
-    }
-
-    // DIALOG WYBORU JEDNOSTKI 2
-    if (showToDialog) {
-        UnitPickerDialog(
-            title = "Wybierz jednostkę",
-            units = category.units,
-            selectedIndex = toUnitIndex,
-            onSelect = {
-                toUnitIndex = it
-                showToDialog = false
-            },
-            onDismiss = { showToDialog = false }
-        )
     }
 }
 
@@ -860,73 +833,43 @@ private fun UnitPickerDialog(
     onDismiss: () -> Unit
 ) {
     val palette = LocalCalculatorPalette.current
-    var searchQuery by remember { mutableStateOf("") }
-    val filtered = remember(searchQuery, units) {
-        if (searchQuery.isBlank()) {
-            units.mapIndexed { idx, u -> idx to u }
-        } else {
-            units.mapIndexed { idx, u -> idx to u }.filter { (_, u) ->
-                u.name.contains(searchQuery, ignoreCase = true) ||
-                u.symbol.contains(searchQuery, ignoreCase = true)
-            }
-        }
-    }
-
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(text = title, fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                OutlinedTextField(
-                    value = searchQuery,
-                    onValueChange = { searchQuery = it },
-                    placeholder = { Text("Szukaj jednostki...") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp)
-                )
-            }
-        },
+        containerColor = palette.cardBg,
+        titleContentColor = palette.numberText,
+        title = { Text(title, fontWeight = FontWeight.SemiBold) },
         text = {
             LazyColumn(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = 340.dp)
+                modifier = Modifier.fillMaxWidth().heightIn(max = 330.dp).selectableGroup(),
+                state = rememberLazyListState(initialFirstVisibleItemIndex = (selectedIndex - 2).coerceAtLeast(0)),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                items(filtered) { (origIdx, u) ->
-                    val isSelected = (origIdx == selectedIndex)
+                itemsIndexed(units, key = { _, unit -> unit.id }) { index, unit ->
+                    val selected = index == selectedIndex
+                    val shape = RoundedCornerShape(12.dp)
                     Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
-                            .clickable { onSelect(origIdx) }
-                            .padding(vertical = 10.dp, horizontal = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                        modifier = Modifier.fillMaxWidth().clip(shape)
+                            .background(if (selected) palette.operatorBtn else Color.Transparent)
+                            .selectable(selected = selected, role = Role.RadioButton, onClick = { onSelect(index) })
+                            .heightIn(min = 52.dp).padding(horizontal = 8.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        RadioButton(
-                            selected = isSelected,
-                            onClick = { onSelect(origIdx) }
+                        UnitSymbol(unit.symbol)
+                        Text(
+                            text = unit.name,
+                            color = palette.numberText,
+                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                            modifier = Modifier.weight(1f)
                         )
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = u.name,
-                                fontSize = 15.sp,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
-                            )
-                            Text(
-                                text = u.symbol,
-                                fontSize = 12.sp,
-                                color = palette.accentEquals
-                            )
+                        if (selected) {
+                            Icon(Icons.Default.Check, null, tint = palette.accentEquals, modifier = Modifier.size(19.dp))
                         }
                     }
                 }
             }
         },
-        confirmButton = {
-            TextButton(onClick = onDismiss) { Text("Anuluj") }
-        }
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Anuluj") } }
     )
 }
 

@@ -43,6 +43,8 @@ class CalculatorViewModel(
         if (settings.value.keepLastExpression) settings.value.lastExpression else ""
     )
     val expression: StateFlow<String> = _expression.asStateFlow()
+    private val _cursor = MutableStateFlow(_expression.value.length)
+    val cursor: StateFlow<Int> = _cursor.asStateFlow()
 
     private val _resultPreview = MutableStateFlow<String?>(null)
     val resultPreview: StateFlow<String?> = _resultPreview.asStateFlow()
@@ -128,115 +130,78 @@ class CalculatorViewModel(
         updatePreview(_expression.value)
     }
 
-    fun onDigit(digit: String) {
-        if (exactResult != null) {
+    fun moveCursor(position: Int) {
+        val cursor = position.coerceIn(0, _expression.value.length)
+        if (cursor != _expression.value.length) {
             exactResult = null
-            _expression.value = ""
+            _lastEvaluation.value = null
         }
-        if (_expression.value.length >= 45) return
-        _errorMessage.value = null
-        _lastEvaluation.value = null
+        _cursor.value = cursor
+    }
+
+    fun onDigit(digit: String) {
+        startFreshAfterResult()
         val current = _expression.value
-        val actualDigit = if (digit == ".") "," else digit
+        val position = _cursor.value
+        val before = current.take(position)
+        val after = current.drop(position)
+        val digitText = if (digit == ".") "," else digit
 
-        if (actualDigit == ",") {
-            if (endsWithDecimalInCurrentNumber(current)) {
-                return
-            }
-            val updated = if (current.isEmpty() || isOperatorChar(current.last()) || current.last() == '(') {
-                current + "0,"
-            } else {
-                current + ","
-            }
-            _expression.value = updated
-            repository.settingsManager.saveLastExpression(updated)
-            updatePreview(updated)
-            return
-        }
-
-        val updated = if (current == "0") {
-            actualDigit
+        if (digitText == ",") {
+            val numberCharacters: (Char) -> Boolean = { it.isDigit() || it in "., " }
+            val number = before.takeLastWhile(numberCharacters) + after.takeWhile(numberCharacters)
+            if (number.any { it == '.' || it == ',' }) return
+            val separator = if (number.isEmpty() && (before.isEmpty() ||
+                    isOperatorChar(before.last()) || before.last() == '(')) "0," else ","
+            editAtCursor(separator)
+        } else if (current == "0" && position == 1) {
+            updateExpression(digitText)
         } else {
-            current + actualDigit
+            editAtCursor(digitText)
         }
-
-        _expression.value = updated
-        repository.settingsManager.saveLastExpression(updated)
-        updatePreview(updated)
     }
 
     fun onOperator(op: String) {
         if (op == "%") {
-            val last = _expression.value.lastOrNull() ?: return
-            if (isOperatorChar(last) || last == '(') return
+            val previous = _expression.value.getOrNull(_cursor.value - 1) ?: return
+            if (isOperatorChar(previous) || previous == '(') return
             onInsert(op)
             return
         }
-        _errorMessage.value = null
-        _lastEvaluation.value = null
-        val current = exactResult?.let { "(${it})" } ?: _expression.value
-        exactResult = null
-
-        if (current.isEmpty()) {
-            if (op == "−" || op == "-") {
-                _expression.value = "−"
-                repository.settingsManager.saveLastExpression("−")
-                return
-            }
+        continueAfterResult()
+        val current = _expression.value
+        val before = current.take(_cursor.value)
+        val after = current.drop(_cursor.value)
+        val isMinus = op == "−" || op == "-"
+        val last = before.lastOrNull()
+        if (last == null) {
+            if (isMinus) editAtCursor("−")
             return
         }
 
-        // If length limit exceeded and we are not replacing an operator, block it
-        val lastChar = current.last()
-        if (current.length >= 45 && !isOperatorChar(lastChar)) {
-            return
+        val hasSignedOperand = before.length > 1 && last in "−-" &&
+            isOperatorChar(before[before.lastIndex - 1])
+        val updatedBefore = when {
+            isMinus && isOperatorChar(last) -> if (hasSignedOperand) before else before + op
+            isOperatorChar(last) -> before.dropLast(if (hasSignedOperand) 2 else 1) + op
+            else -> before + op
         }
-
-        // If last character is already an operator, replace it
-        val updated = if ((op == "−" || op == "-") && isOperatorChar(lastChar)) {
-            // A minus following an operator starts a signed operand (2×−3).
-            if (current.length > 1 && lastChar in "−-" && isOperatorChar(current[current.lastIndex - 1])) current
-            else current + op
-        } else if (isOperatorChar(lastChar)) {
-            val withoutSign = if (current.length > 1 && lastChar in "−-" && isOperatorChar(current[current.lastIndex - 1])) current.dropLast(1) else current
-            withoutSign.dropLast(1) + op
-        } else {
-            current + op
-        }
-
-        _expression.value = updated
-        repository.settingsManager.saveLastExpression(updated)
-        updatePreview(updated)
+        val updated = updatedBefore + after
+        if (updated.length > 45 && updated.length > current.length) return
+        updateExpression(updated, updatedBefore.length)
     }
 
     fun onParentheses() {
-        if (exactResult != null) {
-            exactResult = null
-            _expression.value = ""
-        }
-        if (_expression.value.length >= 45) return
-        _errorMessage.value = null
-        _lastEvaluation.value = null
-        val current = _expression.value
-        val openCount = current.count { it == '(' }
-        val closeCount = current.count { it == ')' }
-
-        val updated = if (current.isEmpty()) {
-            "("
-        } else {
-            val lastChar = current.last()
-            if (openCount > closeCount && (lastChar.isDigit() || lastChar == ')' || lastChar == 'π' || lastChar == 'e' || lastChar == '!')) {
-                current + ")"
-            } else if (lastChar.isDigit() || lastChar == ')' || lastChar == 'π' || lastChar == 'e') {
-                current + "×("
-            } else {
-                current + "("
-            }
-        }
-
-        _expression.value = updated
-        repository.settingsManager.saveLastExpression(updated)
-        updatePreview(updated)
+        startFreshAfterResult()
+        val before = _expression.value.take(_cursor.value)
+        val last = before.lastOrNull()
+        val hasOpen = before.count { it == '(' } > before.count { it == ')' }
+        val afterOperand = last != null && (last.isDigit() || last in ")πe")
+        editAtCursor(when {
+            hasOpen && (afterOperand || last == '!') -> ")"
+            afterOperand -> "×("
+            else -> "("
+        })
     }
 
     fun onInsert(text: String) {
@@ -244,55 +209,59 @@ class CalculatorViewModel(
             onOperator(text)
             return
         }
-        exactResult?.let { result ->
-            _expression.value = if (text == "%" || text == "!") "($result)" else ""
-            exactResult = null
-        }
-        if (_expression.value.length >= 45) return
-        _errorMessage.value = null
-        _lastEvaluation.value = null
-        val current = _expression.value
-        val updated = current + text
-        _expression.value = updated
-        repository.settingsManager.saveLastExpression(updated)
-        updatePreview(updated)
+        if (text == "%" || text == "!") continueAfterResult() else startFreshAfterResult()
+        editAtCursor(text)
     }
 
     fun onBackspace() {
         exactResult = null
         _errorMessage.value = null
         _lastEvaluation.value = null
+        val position = _cursor.value
+        if (position == 0) return
         val current = _expression.value
-        if (current.isNotEmpty()) {
-            // Handle multi-character tokens like "sin(", "asin(", "log(", "sqrt("
-            val multiChars = listOf("asin(", "acos(", "atan(", "sin(", "cos(", "tan(", "log(", "ln(", "sqrt(", "cbrt(")
-            var deleted = false
-            for (fn in multiChars) {
-                if (current.endsWith(fn)) {
-                    val updated = current.substring(0, current.length - fn.length)
-                    _expression.value = updated
-                    repository.settingsManager.saveLastExpression(updated)
-                    updatePreview(updated)
-                    deleted = true
-                    break
-                }
-            }
-            if (!deleted) {
-                val updated = current.dropLast(1)
-                _expression.value = updated
-                repository.settingsManager.saveLastExpression(updated)
-                updatePreview(updated)
-            }
-        }
+        val before = current.take(position)
+        val functions = listOf("asin(", "acos(", "atan(", "sin(", "cos(", "tan(", "log(", "ln(", "sqrt(", "cbrt(")
+        val deleteCount = functions.firstOrNull { before.endsWith(it) }?.length ?: 1
+        val start = position - deleteCount
+        updateExpression(current.removeRange(start, position), start)
     }
 
     fun onClear() {
         exactResult = null
-        _lastEvaluation.value = null
-        _expression.value = ""
-        _resultPreview.value = null
+        updateExpression("")
+    }
+
+    private fun startFreshAfterResult() {
+        if (exactResult == null) return
+        exactResult = null
+        setExpression("")
+    }
+
+    private fun continueAfterResult() {
+        val result = exactResult ?: return
+        exactResult = null
+        setExpression("($result)")
+    }
+
+    private fun editAtCursor(text: String) {
+        val current = _expression.value
+        if (current.length + text.length > 45) return
+        val cursor = _cursor.value
+        updateExpression(current.take(cursor) + text + current.drop(cursor), cursor + text.length)
+    }
+
+    private fun setExpression(text: String, cursor: Int = text.length) {
+        _expression.value = text
+        _cursor.value = cursor
+    }
+
+    private fun updateExpression(text: String, cursor: Int = text.length) {
         _errorMessage.value = null
-        repository.settingsManager.saveLastExpression("")
+        _lastEvaluation.value = null
+        setExpression(text, cursor)
+        repository.settingsManager.saveLastExpression(text)
+        updatePreview(text)
     }
 
     fun onClearAll() {
@@ -327,7 +296,7 @@ class CalculatorViewModel(
                     result = resultStr,
                     timestamp = System.currentTimeMillis()
                 )
-                _expression.value = resultStr
+                setExpression(resultStr)
                 _resultPreview.value = null
                 _errorMessage.value = null
                 repository.settingsManager.saveLastExpression(res.value.toString())
@@ -349,15 +318,7 @@ class CalculatorViewModel(
 
     fun onSelectHistory(item: HistoryEntity, useResultOnly: Boolean) {
         exactResult = null
-        _lastEvaluation.value = null
-        if (useResultOnly) {
-            _expression.value = item.result
-        } else {
-            _expression.value = item.expression
-        }
-        _errorMessage.value = null
-        repository.settingsManager.saveLastExpression(_expression.value)
-        updatePreview(_expression.value)
+        updateExpression(if (useResultOnly) item.result else item.expression)
         _historyViewMode.value = HistoryViewMode.HIDDEN
         _currentScreen.value = Screen.Calculator
     }
@@ -393,17 +354,6 @@ class CalculatorViewModel(
 
     private fun isOperatorChar(c: Char): Boolean {
         return c == '+' || c == '−' || c == '-' || c == '×' || c == '*' || c == '÷' || c == '/' || c == '^'
-    }
-
-    private fun endsWithDecimalInCurrentNumber(expr: String): Boolean {
-        var i = expr.length - 1
-        while (i >= 0) {
-            val c = expr[i]
-            if (c == '.' || c == ',') return true
-            if (!c.isDigit()) break
-            i--
-        }
-        return false
     }
 }
 

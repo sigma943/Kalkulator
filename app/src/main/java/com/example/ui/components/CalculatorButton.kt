@@ -51,6 +51,10 @@ fun CalculatorButton(
     val view = LocalView.current
     val palette = LocalCalculatorPalette.current
     var isPressed by remember { mutableStateOf(false) }
+    val click by rememberUpdatedState(onClick)
+    val longClick by rememberUpdatedState(onLongClick)
+    val vibrate by rememberUpdatedState(vibrateEnabled)
+    val sound by rememberUpdatedState(soundEnabled)
 
     // Energetic spring bounce animation on click
     val scale by animateFloatAsState(
@@ -78,26 +82,24 @@ fun CalculatorButton(
                 detectTapGestures(
                     onPress = {
                         isPressed = true
-                        if (vibrateEnabled) {
+                        if (vibrate) {
                             view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                         }
-                        if (soundEnabled) {
+                        if (sound) {
                             view.playSoundEffect(SoundEffectConstants.CLICK)
                         }
                         tryAwaitRelease()
                         isPressed = false
                     },
                     onLongPress = {
-                        if (onLongClick != null) {
-                            if (vibrateEnabled) {
+                        longClick?.let { action ->
+                            if (vibrate) {
                                 view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
                             }
-                            onLongClick()
+                            action()
                         }
                     },
-                    onTap = {
-                        onClick()
-                    }
+                    onTap = { click() }
                 )
             },
         contentAlignment = Alignment.Center

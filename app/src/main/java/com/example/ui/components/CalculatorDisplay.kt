@@ -20,13 +20,11 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -76,6 +74,8 @@ private fun lerpColor(start: Color, stop: Color, fraction: Float): Color {
 fun CalculatorDisplay(
     modifier: Modifier = Modifier,
     expression: String,
+    cursor: Int,
+    onCursorChange: (Int) -> Unit,
     resultPreview: String?,
     lastEvaluation: EvaluationEvent? = null,
     errorMessage: String?,
@@ -151,11 +151,6 @@ fun CalculatorDisplay(
         ),
         label = "cursorAlpha"
     )
-
-    val scrollState = rememberScrollState()
-    LaunchedEffect(expression) {
-        scrollState.animateScrollTo(scrollState.maxValue)
-    }
 
     val historyListState = rememberLazyListState()
     LaunchedEffect(historyList.size, isHistoryOpen) {
@@ -471,34 +466,17 @@ fun CalculatorDisplay(
                         fontWeight = FontWeight.Medium
                     )
 
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .horizontalScroll(scrollState)
-                            .padding(vertical = 2.dp),
-                        horizontalArrangement = Arrangement.End,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = expression.ifEmpty { "0" },
-                            color = palette.numberText,
-                            fontSize = animatedFontSize.sp,
-                            fontWeight = FontWeight.Light,
-                            textAlign = TextAlign.End,
-                            maxLines = 1,
-                            modifier = Modifier.testTag("display_expression_history")
-                        )
-
-                        // Kursor
-                        Box(
-                            modifier = Modifier
-                                .padding(start = 3.dp)
-                                .width(2.5.dp)
-                                .height((animatedFontSize * 0.8f).dp)
-                                .clip(RoundedCornerShape(1.dp))
-                                .background(palette.cursor.copy(alpha = cursorAlpha))
-                        )
-                    }
+                    KeypadInput(
+                        value = expression,
+                        cursor = cursor,
+                        onCursorChange = onCursorChange,
+                        color = palette.numberText,
+                        cursorColor = palette.cursor.copy(alpha = cursorAlpha),
+                        fontSize = animatedFontSize.sp,
+                        fontWeight = FontWeight.Light,
+                        modifier = Modifier.padding(vertical = 2.dp),
+                        valueModifier = Modifier.testTag("display_expression_history")
+                    )
                 }
             }
         } else {
@@ -588,34 +566,20 @@ fun CalculatorDisplay(
                                     .testTag("display_expression")
                             )
                         } else {
-                            // Standardowy widok wyrażenia z płynnie skalowanym rozmiarem czcionki
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .horizontalScroll(scrollState),
-                                horizontalArrangement = Arrangement.End,
-                                verticalAlignment = Alignment.Bottom
-                            ) {
-                                Text(
-                                    text = expression.ifEmpty { "0" },
-                                    color = if (errorMessage != null) MaterialTheme.colorScheme.error else (if (expression.isEmpty()) palette.numberText.copy(alpha = 0.5f) else palette.numberText),
-                                    fontSize = animatedFontSize.sp,
-                                    fontWeight = FontWeight.Light,
-                                    textAlign = TextAlign.End,
-                                    maxLines = 1,
-                                    modifier = Modifier.testTag("display_expression")
-                                )
-
-                                // Kursor
-                                Box(
-                                    modifier = Modifier
-                                        .padding(start = 3.dp, bottom = (animatedFontSize * 0.12f).dp)
-                                        .width(2.5.dp)
-                                        .height((animatedFontSize * 0.8f).dp)
-                                        .clip(RoundedCornerShape(1.dp))
-                                        .background(palette.cursor.copy(alpha = cursorAlpha))
-                                )
-                            }
+                            KeypadInput(
+                                value = expression,
+                                cursor = cursor,
+                                onCursorChange = onCursorChange,
+                                color = when {
+                                    errorMessage != null -> MaterialTheme.colorScheme.error
+                                    expression.isEmpty() -> palette.numberText.copy(alpha = 0.5f)
+                                    else -> palette.numberText
+                                },
+                                cursorColor = palette.cursor.copy(alpha = cursorAlpha),
+                                fontSize = animatedFontSize.sp,
+                                fontWeight = FontWeight.Light,
+                                valueModifier = Modifier.testTag("display_expression")
+                            )
                         }
                     }
 
